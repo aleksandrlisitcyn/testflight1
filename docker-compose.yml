@@ -1,0 +1,15 @@
+version: '3.9'
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      STORAGE_BACKEND: "fs"
+  minio:
+    image: minio/minio
+    command: server /data
+    ports:
+      - "9000:9000"
