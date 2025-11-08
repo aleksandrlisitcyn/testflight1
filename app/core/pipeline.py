@@ -14,6 +14,28 @@ from .legend import build_legend
 from .symbols import assign_symbols_to_palette
 
 
+def resize_to_max_cells(image: np.ndarray, target_cells: int) -> np.ndarray:
+    if target_cells <= 0:
+        return image
+
+    h, w = image.shape[:2]
+    max_side = max(h, w)
+    if max_side <= 0:
+        return image
+
+    if max_side <= target_cells:
+        return image
+
+    scale = float(target_cells) / float(max_side)
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+
+    import cv2  # local import to avoid mandatory dependency at module import time
+
+    interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    return cv2.resize(image, (new_w, new_h), interpolation=interpolation)
+
+
 def _color_distance(rgb_a: Tuple[int, int, int], rgb_b: Tuple[int, int, int]) -> float:
     arr_a = np.array(rgb_a, dtype=float)
     arr_b = np.array(rgb_b, dtype=float)
@@ -21,11 +43,30 @@ def _color_distance(rgb_a: Tuple[int, int, int], rgb_b: Tuple[int, int, int]) ->
 
 
 def process_image_to_pattern(
-    img: np.ndarray,
+    image: np.ndarray,
     brand: Literal["DMC", "Gamma", "Anchor", "auto"] = "DMC",
     min_cells: int = 30,
 ) -> Pattern:
-    roi = detect_pattern_roi(img)
+    # === Улучшено: адаптивное масштабирование ===
+    # определяем длину большей стороны
+    h, w = image.shape[:2]
+    max_side = max(h, w)
+
+    # определяем количество клеток в зависимости от размера изображения
+    # для крупных изображений — до 400-600 клеток, для мелких — не уменьшаем
+    target_cells = min(max_side // 4, 600)
+    if target_cells <= 0:
+        target_cells = max_side
+
+    # изменяем размер, сохраняя пропорции
+    image = resize_to_max_cells(image, target_cells)
+
+    # небольшое сглаживание для уменьшения шумов
+    import cv2
+
+    image = cv2.GaussianBlur(image, (3, 3), 0)
+
+    roi = detect_pattern_roi(image)
     grid_dict = detect_and_rectify_grid(roi)
     colors = split_into_cells_and_average(roi, grid_dict)
 
@@ -107,6 +148,13 @@ def process_image_to_pattern(
     )
     legend = build_legend(pattern, force=True)
     pattern.meta["legend"] = legend
+    if len({s.thread.code for s in pattern.stitches}) < 5 and min_cells > 1:
+        return process_image_to_pattern(
+            image,
+            brand=brand,
+            min_cells=max(1, int(min_cells * 0.5)),
+        )
+
     return pattern
 
 
