@@ -2,9 +2,9 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional, List, Literal, Any
 
 class JobStatus(BaseModel):
-    status: Literal["done","processing","failed"]
+    status: Literal["done", "processing", "failed"]
     progress: float
-    meta: dict[str, Any] = {}
+    meta: dict[str, Any] = Field(default_factory=dict)
     grid: Optional[dict] = None
 
 class ExportRequest(BaseModel):

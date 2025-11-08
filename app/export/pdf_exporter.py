@@ -10,8 +10,8 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from PIL import Image
 from weasyprint import HTML
 
-from ..core.legend import build_legend
 from ..core.pipeline import render_preview
+from .context import build_export_context, rgb_to_hex
 
 STITCHES_PER_CM = 5.5  # Approximate 14ct Aida cloth
 
@@ -25,13 +25,6 @@ def _get_template():
     return env.get_template("pattern_pdf.html")
 
 
-def _rgb_to_hex(rgb) -> str:
-    if not rgb:
-        return "#FFFFFF"
-    r, g, b = (int(v) for v in rgb)
-    return f"#{r:02X}{g:02X}{b:02X}"
-
-
 def _encode_preview(pattern: dict, mode: str) -> str:
     png_bytes = render_preview(pattern, mode=mode)
     with Image.open(io.BytesIO(png_bytes)) as img:
@@ -42,37 +35,28 @@ def _encode_preview(pattern: dict, mode: str) -> str:
 
 
 def _build_pdf_context(pattern: dict) -> Dict[str, object]:
-    if hasattr(pattern, "model_dump"):
-        pattern = pattern.model_dump()
-    elif hasattr(pattern, "dict"):
-        pattern = pattern.dict()
+    base = build_export_context(pattern)
+    legend_with_hex = []
+    for entry in base["legend"]:
+        enriched = dict(entry)
+        enriched["hex"] = rgb_to_hex(enriched.get("rgb"))
+        legend_with_hex.append(enriched)
 
-    grid = pattern.get("canvasGrid", {"width": 0, "height": 0})
-    legend = build_legend(pattern)
-
-    for row in legend:
-        row["hex"] = _rgb_to_hex(row.get("rgb"))
-
-    total_stitches = pattern.get("meta", {}).get("total_stitches") or sum(
-        row.get("count", 0) for row in legend
-    )
-    palette_size = pattern.get("meta", {}).get("palette_size") or len(legend)
-
-    width_cm = round(grid.get("width", 0) / STITCHES_PER_CM, 1)
-    height_cm = round(grid.get("height", 0) / STITCHES_PER_CM, 1)
+    width_cm = round(base["grid"]["width"] / STITCHES_PER_CM, 1)
+    height_cm = round(base["grid"]["height"] / STITCHES_PER_CM, 1)
 
     return {
-        "title": pattern.get("meta", {}).get("title", "Generated Pattern"),
-        "brand": pattern.get("meta", {}).get("brand", "Unknown"),
-        "grid": grid,
-        "legend": legend,
-        "total_stitches": total_stitches,
-        "palette_size": palette_size,
+        "title": base["meta"].get("title", "Generated Pattern"),
+        "brand": base["meta"].get("brand", "Unknown"),
+        "grid": base["grid"],
+        "legend": legend_with_hex,
+        "total_stitches": base["meta"].get("total_stitches", 0),
+        "palette_size": base["meta"].get("palette_size", len(legend_with_hex)),
         "stitch_per_cm": STITCHES_PER_CM,
         "estimated_size": {"cm_width": width_cm, "cm_height": height_cm},
         "previews": {
-            "color": _encode_preview(pattern, mode="color"),
-            "symbols": _encode_preview(pattern, mode="symbols"),
+            "color": _encode_preview(base["pattern"], mode="color"),
+            "symbols": _encode_preview(base["pattern"], mode="symbols"),
         },
     }
 

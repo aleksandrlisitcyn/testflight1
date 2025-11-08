@@ -14,6 +14,10 @@ from ..export.saga_exporter import export_saga
 from ..export.pdf_exporter import export_pdf
 from ..export.json_exporter import export_json
 from ..export.csv_exporter import export_csv
+from ..export.xsd_exporter import export_xsd
+from ..export.xsp_exporter import export_xsp
+from ..export.css_exporter import export_css
+from ..export.dize_exporter import export_dize
 from ..models.api_schemas import (
     ExportRequest,
     JobStatus,
@@ -111,22 +115,42 @@ async def export(job_id: str, req: ExportRequest):
             data = export_saga(pattern)
             path = f"{job_id}/pattern.saga"
             storage.save_bytes(path, data.encode("utf-8"))
-            links.append({"format":"saga","path":path})
+            links.append({"format": "saga", "path": path})
         elif fmt == "pdf":
             pdf = export_pdf(pattern)
             path = f"{job_id}/pattern.pdf"
             storage.save_bytes(path, pdf)
-            links.append({"format":"pdf","path":path})
+            links.append({"format": "pdf", "path": path})
         elif fmt == "json":
             data = export_json(pattern)
             path = f"{job_id}/pattern.json"
             storage.save_bytes(path, data.encode("utf-8"))
-            links.append({"format":"json","path":path})
+            links.append({"format": "json", "path": path})
         elif fmt == "csv":
             data = export_csv(pattern)
             path = f"{job_id}/pattern.csv"
             storage.save_bytes(path, data.encode("utf-8"))
-            links.append({"format":"csv","path":path})
+            links.append({"format": "csv", "path": path})
+        elif fmt == "xsd":
+            data = export_xsd(pattern)
+            path = f"{job_id}/pattern.xsd"
+            storage.save_bytes(path, data.encode("utf-8"))
+            links.append({"format": "xsd", "path": path})
+        elif fmt == "xsp":
+            data = export_xsp(pattern)
+            path = f"{job_id}/pattern.xsp"
+            storage.save_bytes(path, data.encode("utf-8"))
+            links.append({"format": "xsp", "path": path})
+        elif fmt == "css":
+            data = export_css(pattern)
+            path = f"{job_id}/pattern.css"
+            storage.save_bytes(path, data.encode("utf-8"))
+            links.append({"format": "css", "path": path})
+        elif fmt == "dize":
+            payload = export_dize(pattern)
+            path = f"{job_id}/pattern.dize"
+            storage.save_bytes(path, payload)
+            links.append({"format": "dize", "path": path})
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported export format: {fmt}")
     return {"files": links}
