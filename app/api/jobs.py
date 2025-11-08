@@ -1,7 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, Response
 from uuid import uuid4
-from typing import Literal, Optional
+from typing import Literal
 import io
 import numpy as np
 from PIL import Image
@@ -32,7 +32,8 @@ router = APIRouter()
 async def create_job(
     file: UploadFile = File(...),
     brand: Literal["DMC","Gamma","Anchor","auto"] = "DMC",
-    min_cells_per_color: int = 30
+    min_cells_per_color: int = 30,
+    detail_level: Literal["low", "medium", "high"] = "medium",
 ):
     if file.content_type not in {"image/jpeg","image/png"}:
         raise HTTPException(status_code=400, detail="Unsupported file type")
@@ -50,6 +51,21 @@ async def create_job(
         job_id,
         status="processing",
         progress=0.2,
+        meta={
+            "filename": file.filename,
+            "brand": brand,
+            "min_cells": min_cells_per_color,
+            "detail_level": detail_level,
+        },
+    )
+
+    # Synchronous pipeline for scaffold (replace with background tasks if needed)
+    pattern = process_image_to_pattern(
+        np.array(img),
+        brand=brand,
+        min_cells=min_cells_per_color,
+        detail_level=detail_level,
+    )
         meta={"filename": file.filename, "brand": brand, "min_cells": min_cells_per_color},
     )
 
@@ -69,6 +85,8 @@ async def create_job(
         "status": record.status if record else "processing",
         "progress": record.progress if record else 0.2,
     }
+    if record and record.meta:
+        status_payload["meta"] = record.meta
     return JSONResponse(status_payload)
 
 @router.get("/jobs/{job_id}")

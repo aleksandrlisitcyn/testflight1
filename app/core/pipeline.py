@@ -46,6 +46,42 @@ def process_image_to_pattern(
     image: np.ndarray,
     brand: Literal["DMC", "Gamma", "Anchor", "auto"] = "DMC",
     min_cells: int = 30,
+    detail_level: Literal["low", "medium", "high"] = "medium",
+) -> Pattern:
+    # === Улучшено: адаптивная детализация и масштабирование ===
+    import cv2
+
+    h, w = image.shape[:2]
+    max_side = max(h, w) or 1
+
+    if detail_level == "low":
+        target_cells = min(max_side // 8, 250)
+        contrast_alpha = 1.05
+        contrast_beta = 5
+        min_cells_bias = 1.2
+    elif detail_level == "high":
+        target_cells = min(max_side // 2, 800)
+        contrast_alpha = 1.2
+        contrast_beta = 12
+        min_cells_bias = 0.6
+    else:
+        target_cells = min(max_side // 4, 400)
+        contrast_alpha = 1.15
+        contrast_beta = 10
+        min_cells_bias = 1.0
+
+    if target_cells <= 0:
+        target_cells = max_side
+
+    scale = max(target_cells / float(max_side), 1e-6)
+    new_w = max(1, int(round(w * scale)))
+    new_h = max(1, int(round(h * scale)))
+    interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_CUBIC
+    image = cv2.resize(image, (new_w, new_h), interpolation=interpolation)
+
+    # лёгкое размытие и повышение контраста
+    image = cv2.GaussianBlur(image, (3, 3), 0)
+    image = cv2.convertScaleAbs(image, alpha=contrast_alpha, beta=contrast_beta)
 ) -> Pattern:
     # === Улучшено: адаптивное масштабирование ===
     # определяем длину большей стороны
@@ -85,6 +121,9 @@ def process_image_to_pattern(
         counts[key] += 1
         stitches_raw.append({"x": int(x), "y": int(y), "key": key})
 
+    effective_min_cells = max(1, int(round(min_cells * min_cells_bias)))
+    if counts and effective_min_cells > 1:
+        major_keys = {key for key, count in counts.items() if count >= effective_min_cells}
     if counts and min_cells > 1:
         major_keys = {key for key, count in counts.items() if count >= min_cells}
         if not major_keys:
@@ -148,6 +187,18 @@ def process_image_to_pattern(
     )
     legend = build_legend(pattern, force=True)
     pattern.meta["legend"] = legend
+    if len({s.thread.code for s in pattern.stitches}) < 5 and effective_min_cells > 1:
+        return process_image_to_pattern(
+            image,
+            brand=brand,
+            min_cells=max(1, int(effective_min_cells * 0.5)),
+            detail_level=detail_level,
+        )
+
+    # финальная нормализация сетки
+    pattern.canvasGrid.width = int(image.shape[1])
+    pattern.canvasGrid.height = int(image.shape[0])
+    pattern.meta["detail_level"] = detail_level
     if len({s.thread.code for s in pattern.stitches}) < 5 and min_cells > 1:
         return process_image_to_pattern(
             image,

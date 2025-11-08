@@ -1,3 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>Stitch Converter</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f5f5; }
+    form { background: #fff; padding: 1.5rem; border-radius: 8px; max-width: 420px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
+    input, select { width: 100%; padding: 0.5rem; margin-bottom: 1rem; }
+    button { padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Загрузка изображения</h1>
+  <form id="upload-form" enctype="multipart/form-data" method="post" action="/api/v1/jobs">
+    <label>Изображение:</label>
+    <input type="file" name="file" accept="image/png,image/jpeg" required>
+
+    <label>Бренд:</label>
+    <select name="brand">
+      <option value="DMC" selected>DMC</option>
+      <option value="Gamma">Gamma</option>
+      <option value="Anchor">Anchor</option>
+      <option value="auto">Авто</option>
+    </select>
+
+    <label>Мин. ячеек на цвет:</label>
+    <input type="number" name="min_cells_per_color" value="30" min="1">
+
+    <label>Детализация:</label>
+    <select name="detail_level">
+      <option value="low">Низкая</option>
+      <option value="medium" selected>Средняя</option>
+      <option value="high">Высокая</option>
+    </select>
+
+    <button type="submit">Создать схему</button>
+  </form>
 <!DOCTYPE html>
 <html lang="ru">
 <head>
