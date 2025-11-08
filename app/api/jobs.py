@@ -52,7 +52,26 @@ async def create_job(
     storage = get_storage()
     storage.save_json(f"{job_id}/pattern.json", pattern.dict())
 
-    return JSONResponse({"job_id": job_id, "status": "processing"})
+    # === 🔽 Добавляем автоматический экспорт ===
+    try:
+        pattern_dict = pattern.dict()
+
+        # Экспорт PDF
+        pdf_bytes = export_pdf(pattern_dict)
+        storage.save_bytes(f"{job_id}/pattern.pdf", pdf_bytes)
+
+        # Экспорт SAGA
+        saga_data = export_saga(pattern_dict)
+        # saga_data может быть str или bytes
+        if isinstance(saga_data, str):
+            saga_bytes = saga_data.encode("utf-8")
+        else:
+            saga_bytes = saga_data
+        storage.save_bytes(f"{job_id}/pattern.saga", saga_bytes)
+    except Exception as e:
+        print(f"[WARN] Export failed: {e}")
+
+    return JSONResponse({"job_id": job_id, "status": "done"})
 
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str):
