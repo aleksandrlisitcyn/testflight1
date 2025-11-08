@@ -155,9 +155,6 @@ def process_image_to_pattern(
             min_cells=max(1, int(min_cells * 0.5)),
         )
 
-    # финальная нормализация сетки
-    pattern.canvasGrid.width = int(image.shape[1])
-    pattern.canvasGrid.height = int(image.shape[0])
     return pattern
 
 
