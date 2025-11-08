@@ -89,8 +89,7 @@ async def get_legend(job_id: str):
     record = job_store.get(job_id)
     if not record or record.status != "done" or not record.pattern:
         raise HTTPException(status_code=404, detail="Job not ready")
-    job = record.to_dict()
-    legend = build_legend(job["pattern"])
+    legend = build_legend(record.pattern)
     return legend
 
 @router.get("/jobs/{job_id}/preview")
