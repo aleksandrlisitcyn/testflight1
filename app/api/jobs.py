@@ -80,6 +80,8 @@ async def create_job(
         "status": record.status if record else "processing",
         "progress": record.progress if record else 0.2,
     }
+    if record and record.meta:
+        status_payload["meta"] = record.meta
     return JSONResponse(status_payload)
 
 @router.get("/jobs/{job_id}")
