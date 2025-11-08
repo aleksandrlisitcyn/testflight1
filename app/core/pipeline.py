@@ -10,6 +10,7 @@ from ..color.palette_matcher import build_kd, nearest_color
 from ..cv.cell_sampler import split_into_cells_and_average
 from ..cv.grid_detector import detect_and_rectify_grid, detect_pattern_roi
 from ..models.pattern import CanvasGrid, Pattern, Stitch, ThreadRef
+from .legend import build_legend
 from .symbols import assign_symbols_to_palette
 
 
@@ -61,7 +62,11 @@ def process_image_to_pattern(
     for stitch in stitches_raw:
         final_counts[stitch["key"]] += 1
 
-    palette_items = sorted(used_palette.items(), key=lambda item: final_counts.get(item[0], 0), reverse=True)
+    palette_items = sorted(
+        used_palette.items(),
+        key=lambda item: final_counts.get(item[0], 0),
+        reverse=True,
+    )
     palette_list = [dict(value) for _, value in palette_items]
     palette_list = assign_symbols_to_palette(palette_list)
     thread_map: dict[Tuple[str, str], ThreadRef] = {}
@@ -83,6 +88,8 @@ def process_image_to_pattern(
             continue
         stitches.append(Stitch(x=stitch["x"], y=stitch["y"], thread=thread))
 
+    total_stitches = sum(final_counts.values())
+
     pattern = Pattern(
         canvasGrid=CanvasGrid(
             width=int(grid_dict["width"]),
@@ -90,13 +97,23 @@ def process_image_to_pattern(
         ),
         palette=list(thread_map.values()),
         stitches=stitches,
-        meta={"title": "Generated Pattern", "dpi": 300, "brand": resolved_brand},
+        meta={
+            "title": "Generated Pattern",
+            "dpi": 300,
+            "brand": resolved_brand,
+            "palette_size": len(thread_map),
+            "total_stitches": total_stitches,
+        },
     )
+    legend = build_legend(pattern, force=True)
+    pattern.meta["legend"] = legend
     return pattern
 
 
 def render_preview(pattern: dict, mode: str = "color") -> bytes:
-    if hasattr(pattern, "dict"):
+    if hasattr(pattern, "model_dump"):
+        pattern = pattern.model_dump()
+    elif hasattr(pattern, "dict"):
         pattern = pattern.dict()
     w = pattern["canvasGrid"]["width"]
     h = pattern["canvasGrid"]["height"]
@@ -119,9 +136,19 @@ def render_preview(pattern: dict, mode: str = "color") -> bytes:
         img[y * cell : (y + 1) * cell, x * cell : (x + 1) * cell] = rgb
 
     pil = Image.fromarray(img, mode="RGB")
+    draw = ImageDraw.Draw(pil)
+
+    # Draw grid lines for clarity
+    base_color = (210, 210, 210)
+    accent_color = (120, 120, 120)
+    for x in range(w + 1):
+        color = accent_color if x % 10 == 0 else base_color
+        draw.line((x * cell, 0, x * cell, h * cell), fill=color, width=1)
+    for y in range(h + 1):
+        color = accent_color if y % 10 == 0 else base_color
+        draw.line((0, y * cell, w * cell, y * cell), fill=color, width=1)
 
     if mode == "symbols":
-        draw = ImageDraw.Draw(pil)
         try:
             font = ImageFont.truetype("DejaVuSans.ttf", max(12, cell - 6))
         except Exception:  # pragma: no cover - optional font availability

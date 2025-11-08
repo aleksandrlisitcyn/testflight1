@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Tuple, Literal, Any
 
 class CanvasGrid(BaseModel):
@@ -21,4 +21,4 @@ class Pattern(BaseModel):
     canvasGrid: CanvasGrid
     palette: List[ThreadRef]
     stitches: List[Stitch]
-    meta: dict[str, Any] = {}
+    meta: dict[str, Any] = Field(default_factory=dict)
