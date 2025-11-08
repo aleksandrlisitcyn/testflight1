@@ -22,23 +22,39 @@ def build_legend(pattern, *, force: bool = False) -> List[dict]:
         # Return a copy so callers can safely mutate the result.
         return [dict(entry) for entry in meta["legend"]]
 
-    stitches = pattern_dict.get("stitches", [])
-    palette_lookup: dict[tuple[str, str], dict] = {}
-    for p in pattern_dict.get("palette", []):
-        brand = p.get("brand")
-        code = p.get("code")
-        if brand and code:
-            palette_lookup[(brand, code)] = p
-    for stitch in pattern_dict.get("stitches", []):
-        thread = stitch.get("thread") if isinstance(stitch, dict) else None
-        if not thread:
-            continue
-        brand = thread.get("brand")
-        code = thread.get("code")
-        if brand and code and (brand, code) not in palette_lookup:
-            palette_lookup[(brand, code)] = thread
+    def _thread_info(value):
+        data = _as_dict(value)
+        if not isinstance(data, dict):
+            return None
+        if "thread" in data and isinstance(data["thread"], dict):
+            return _thread_info(data["thread"])
+        brand = data.get("brand")
+        code = data.get("code")
+        if not (brand and code):
+            return None
+        info = {"brand": brand, "code": code}
+        for key in ("name", "symbol", "rgb"):
+            if data.get(key) is not None:
+                info[key] = data[key]
+        return info
 
-    counts = Counter((s["thread"]["brand"], s["thread"]["code"]) for s in stitches)
+    palette_lookup: dict[tuple[str, str], dict] = {}
+    for entry in pattern_dict.get("palette", []):
+        info = _thread_info(entry)
+        if not info:
+            continue
+        palette_lookup[(info["brand"], info["code"])] = info
+
+    counts: Counter[tuple[str, str]] = Counter()
+    for stitch in pattern_dict.get("stitches", []):
+        info = _thread_info(stitch)
+        if not info:
+            continue
+        key = (info["brand"], info["code"])
+        counts[key] += 1
+        if key not in palette_lookup:
+            palette_lookup[key] = info
+
     total = sum(counts.values()) or 1
     legend: List[dict] = []
     for key, count in counts.most_common():
