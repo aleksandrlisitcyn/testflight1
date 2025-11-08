@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Dict, Iterable, Optional
+from typing import Callable, Dict, Iterable, Optional
 import time
 import copy
 
@@ -67,6 +67,17 @@ class JobStore:
                 record.grid = copy.deepcopy(grid)
             record.updated_at = time.time()
             return record
+
+    def update_pattern(self, job_id: str, updater: Callable[[dict], dict]) -> Optional[dict]:
+        with self._lock:
+            record = self._jobs.get(job_id)
+            if not record or record.pattern is None:
+                return None
+            pattern = copy.deepcopy(record.pattern)
+            pattern = updater(pattern)
+            record.pattern = pattern
+            record.updated_at = time.time()
+            return copy.deepcopy(pattern)
 
     def get(self, job_id: str) -> Optional[JobRecord]:
         with self._lock:

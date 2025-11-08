@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, Response
 from uuid import uuid4
 from typing import Literal, Optional
@@ -7,12 +7,19 @@ import numpy as np
 from PIL import Image
 
 from ..core.pipeline import process_image_to_pattern, render_preview
+from ..core.legend import build_legend
+from ..core.pattern_edit import apply_legend_updates, apply_meta_updates
 from ..core.jobs import store as job_store
 from ..export.saga_exporter import export_saga
 from ..export.pdf_exporter import export_pdf
 from ..export.json_exporter import export_json
 from ..export.csv_exporter import export_csv
-from ..models.api_schemas import JobStatus, ExportRequest
+from ..models.api_schemas import (
+    ExportRequest,
+    JobStatus,
+    LegendUpdateRequest,
+    MetaUpdateRequest,
+)
 from ..storage import get_storage
 
 router = APIRouter()
@@ -52,7 +59,13 @@ async def create_job(
     storage = get_storage()
     storage.save_json(f"{job_id}/pattern.json", pattern.dict())
 
-    return JSONResponse({"job_id": job_id, "status": "processing"})
+    record = job_store.get(job_id)
+    status_payload = {
+        "job_id": job_id,
+        "status": record.status if record else "processing",
+        "progress": record.progress if record else 0.2,
+    }
+    return JSONResponse(status_payload)
 
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str):
@@ -73,19 +86,7 @@ async def get_legend(job_id: str):
     if not record or record.status != "done" or not record.pattern:
         raise HTTPException(status_code=404, detail="Job not ready")
     job = record.to_dict()
-    legend = []
-    palette = job["pattern"]["palette"]
-    # Count stitches per code
-    counts = {}
-    for s in job["pattern"]["stitches"]:
-        key = (s["thread"]["brand"], s["thread"]["code"])
-        counts[key] = counts.get(key, 0) + 1
-    for p in palette:
-        key = (p["brand"], p["code"])
-        legend.append({
-            "brand": p["brand"], "code": p["code"],
-            "name": p.get("name"), "count": counts.get(key, 0)
-        })
+    legend = build_legend(job["pattern"])
     return legend
 
 @router.get("/jobs/{job_id}/preview")
@@ -129,3 +130,44 @@ async def export(job_id: str, req: ExportRequest):
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported export format: {fmt}")
     return {"files": links}
+
+
+@router.patch("/jobs/{job_id}/meta")
+async def update_meta(job_id: str, payload: MetaUpdateRequest):
+    record = job_store.get(job_id)
+    if not record or record.pattern is None:
+        raise HTTPException(status_code=404, detail="Job not ready")
+
+    updates = {k: v for k, v in payload.dict(exclude_unset=True).items() if v is not None}
+    if not updates:
+        raise HTTPException(status_code=400, detail="No meta fields provided")
+
+    def apply(pattern: dict) -> dict:
+        return apply_meta_updates(pattern, updates)
+
+    updated_pattern = job_store.update_pattern(job_id, apply)
+    if updated_pattern is None:
+        raise HTTPException(status_code=404, detail="Job not ready")
+
+    combined_meta = {**(record.meta or {}), **updates}
+    job_store.update(job_id, meta=combined_meta)
+    return {"meta": updated_pattern.get("meta", {})}
+
+
+@router.patch("/jobs/{job_id}/legend")
+async def update_legend(job_id: str, payload: LegendUpdateRequest):
+    record = job_store.get(job_id)
+    if not record or record.status != "done" or record.pattern is None:
+        raise HTTPException(status_code=404, detail="Job not ready")
+
+    updates = [entry.model_dump(exclude_none=True) for entry in payload.entries]
+
+    def apply(pattern: dict) -> dict:
+        return apply_legend_updates(pattern, updates)
+
+    updated_pattern = job_store.update_pattern(job_id, apply)
+    if updated_pattern is None:
+        raise HTTPException(status_code=404, detail="Job not ready")
+
+    legend = build_legend(updated_pattern)
+    return {"legend": legend}

@@ -10,6 +10,7 @@ from ..color.palette_matcher import build_kd, nearest_color
 from ..cv.cell_sampler import split_into_cells_and_average
 from ..cv.grid_detector import detect_and_rectify_grid, detect_pattern_roi
 from ..models.pattern import CanvasGrid, Pattern, Stitch, ThreadRef
+from .legend import build_legend
 from .symbols import assign_symbols_to_palette
 
 
@@ -88,25 +89,6 @@ def process_image_to_pattern(
         stitches.append(Stitch(x=stitch["x"], y=stitch["y"], thread=thread))
 
     total_stitches = sum(final_counts.values())
-    legend = []
-    for key, thread in thread_map.items():
-        count = final_counts.get(key, 0)
-        if count <= 0:
-            continue
-        rgb = thread.rgb or (0, 0, 0)
-        legend.append(
-            {
-                "brand": thread.brand,
-                "code": thread.code,
-                "name": thread.name,
-                "symbol": thread.symbol,
-                "rgb": rgb,
-                "count": count,
-                "percent": round((count / total_stitches) * 100, 2) if total_stitches else 0.0,
-            }
-        )
-
-    legend.sort(key=lambda entry: entry["count"], reverse=True)
 
     pattern = Pattern(
         canvasGrid=CanvasGrid(
@@ -121,9 +103,10 @@ def process_image_to_pattern(
             "brand": resolved_brand,
             "palette_size": len(thread_map),
             "total_stitches": total_stitches,
-            "legend": legend,
         },
     )
+    legend = build_legend(pattern, force=True)
+    pattern.meta["legend"] = legend
     return pattern
 
 

@@ -4,24 +4,39 @@ from collections import Counter
 from typing import List
 
 
-def build_legend(pattern) -> List[dict]:
+def _as_dict(pattern):
+    if hasattr(pattern, "model_dump"):
+        return pattern.model_dump()
+    if hasattr(pattern, "dict"):
+        return pattern.dict()
+    return pattern
+
+
+def build_legend(pattern, *, force: bool = False) -> List[dict]:
     """Return a legend enriched with counts, colour, and symbol info."""
 
-    if hasattr(pattern, "model_dump"):
-        pattern = pattern.model_dump()
-    elif hasattr(pattern, "dict"):
-        pattern = pattern.dict()
+    pattern_dict = _as_dict(pattern)
 
-    if pattern.get("meta", {}).get("legend"):
-        return list(pattern["meta"]["legend"])  # already prepared
+    meta = pattern_dict.get("meta") or {}
+    if not force and meta.get("legend"):
+        # Return a copy so callers can safely mutate the result.
+        return [dict(entry) for entry in meta["legend"]]
 
-    stitches = pattern.get("stitches", [])
-    palette_lookup = {
-        (p["thread"]["brand"], p["thread"]["code"]): p["thread"]
-        if "thread" in p
-        else p
-        for p in pattern.get("palette", [])
-    }
+    stitches = pattern_dict.get("stitches", [])
+    palette_lookup: dict[tuple[str, str], dict] = {}
+    for p in pattern_dict.get("palette", []):
+        brand = p.get("brand")
+        code = p.get("code")
+        if brand and code:
+            palette_lookup[(brand, code)] = p
+    for stitch in pattern_dict.get("stitches", []):
+        thread = stitch.get("thread") if isinstance(stitch, dict) else None
+        if not thread:
+            continue
+        brand = thread.get("brand")
+        code = thread.get("code")
+        if brand and code and (brand, code) not in palette_lookup:
+            palette_lookup[(brand, code)] = thread
 
     counts = Counter((s["thread"]["brand"], s["thread"]["code"]) for s in stitches)
     total = sum(counts.values()) or 1
