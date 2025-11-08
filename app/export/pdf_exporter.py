@@ -31,7 +31,7 @@ def export_pdf(pattern: dict) -> bytes:
         counts[key] = counts.get(key, 0) + 1
     palette_lookup = {(p["brand"], p["code"]): p for p in pattern["palette"]}
     legend = []
-    for key, count in counts.items():
+    for key, count in sorted(counts.items(), key=lambda item: item[1], reverse=True):
         p = palette_lookup.get(key, {"brand": key[0], "code": key[1], "name": None})
         legend.append({"brand": p["brand"], "code": p["code"], "name": p.get("name"), "count": count})
 
