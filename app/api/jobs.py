@@ -7,6 +7,7 @@ import numpy as np
 from PIL import Image
 
 from ..core.pipeline import process_image_to_pattern, render_preview
+from ..core.jobs import store as job_store
 from ..export.saga_exporter import export_saga
 from ..export.pdf_exporter import export_pdf
 from ..export.json_exporter import export_json
@@ -15,9 +16,6 @@ from ..models.api_schemas import JobStatus, ExportRequest
 from ..storage import get_storage
 
 router = APIRouter()
-
-# Simple in-memory job registry (for demo/scaffold)
-_JOBS: dict[str, dict] = {}
 
 @router.post("/jobs")
 async def create_job(
@@ -37,28 +35,31 @@ async def create_job(
         raise HTTPException(status_code=400, detail="Image too large (max side 3000px)")
 
     job_id = str(uuid4())
-    _JOBS[job_id] = {"status": "processing", "progress": 0.2, "meta": {"filename": file.filename}}
+    job_store.create(
+        job_id,
+        status="processing",
+        progress=0.2,
+        meta={"filename": file.filename, "brand": brand, "min_cells": min_cells_per_color},
+    )
 
     # Synchronous pipeline for scaffold (replace with background tasks if needed)
     pattern = process_image_to_pattern(np.array(img), brand=brand, min_cells=min_cells_per_color)
-    _JOBS[job_id].update({
-        "status": "done",
-        "progress": 1.0,
-        "grid": {"width": pattern.canvasGrid.width, "height": pattern.canvasGrid.height},
-        "pattern": pattern.dict()
-    })
+    job_store.update(job_id, status="done", progress=1.0)
+    grid = {"width": pattern.canvasGrid.width, "height": pattern.canvasGrid.height}
+    job_store.set_pattern(job_id, pattern.dict(), grid=grid)
 
     # Store internal JSON
     storage = get_storage()
-    storage.save_json(f"{job_id}/pattern.json", _JOBS[job_id]["pattern"])
+    storage.save_json(f"{job_id}/pattern.json", pattern.dict())
 
     return JSONResponse({"job_id": job_id, "status": "processing"})
 
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str):
-    job = _JOBS.get(job_id)
-    if not job:
+    record = job_store.get(job_id)
+    if not record:
         raise HTTPException(status_code=404, detail="Job not found")
+    job = record.to_dict(include_pattern=True)
     return JobStatus(**{
         "status": job["status"],
         "progress": job["progress"],
@@ -68,9 +69,10 @@ async def get_job(job_id: str):
 
 @router.get("/jobs/{job_id}/legend")
 async def get_legend(job_id: str):
-    job = _JOBS.get(job_id)
-    if not job or job["status"] != "done":
+    record = job_store.get(job_id)
+    if not record or record.status != "done" or not record.pattern:
         raise HTTPException(status_code=404, detail="Job not ready")
+    job = record.to_dict()
     legend = []
     palette = job["pattern"]["palette"]
     # Count stitches per code
@@ -88,18 +90,18 @@ async def get_legend(job_id: str):
 
 @router.get("/jobs/{job_id}/preview")
 async def preview(job_id: str, mode: Literal["color","symbols"] = "color"):
-    job = _JOBS.get(job_id)
-    if not job or job["status"] != "done":
+    record = job_store.get(job_id)
+    if not record or record.status != "done" or not record.pattern:
         raise HTTPException(status_code=404, detail="Job not ready")
-    img_bytes = render_preview(job["pattern"], mode=mode)
+    img_bytes = render_preview(record.pattern, mode=mode)
     return Response(content=img_bytes, media_type="image/png")
 
 @router.post("/jobs/{job_id}/export")
 async def export(job_id: str, req: ExportRequest):
-    job = _JOBS.get(job_id)
-    if not job or job["status"] != "done":
+    record = job_store.get(job_id)
+    if not record or record.status != "done" or not record.pattern:
         raise HTTPException(status_code=404, detail="Job not ready")
-    pattern = job["pattern"]
+    pattern = record.pattern
     storage = get_storage()
 
     links = []
@@ -124,5 +126,6 @@ async def export(job_id: str, req: ExportRequest):
             path = f"{job_id}/pattern.csv"
             storage.save_bytes(path, data.encode("utf-8"))
             links.append({"format":"csv","path":path})
-        # place-holders for xsd/xsp/css/dize could be added similarly
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported export format: {fmt}")
     return {"files": links}

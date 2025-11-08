@@ -1,61 +1,146 @@
+import io
+from collections import Counter
+from typing import Literal, Tuple
+
 import numpy as np
-from typing import Literal
-from ..models.pattern import Pattern, CanvasGrid, ThreadRef, Stitch
-from ..cv.grid_detector import detect_pattern_roi, detect_and_rectify_grid
-from ..cv.cell_sampler import split_into_cells_and_average
+from PIL import Image, ImageDraw, ImageFont
+
 from ..color.palette_loader import load_palette
 from ..color.palette_matcher import build_kd, nearest_color
+from ..cv.cell_sampler import split_into_cells_and_average
+from ..cv.grid_detector import detect_and_rectify_grid, detect_pattern_roi
+from ..models.pattern import CanvasGrid, Pattern, Stitch, ThreadRef
 from .symbols import assign_symbols_to_palette
-from PIL import Image
-import io
 
-def process_image_to_pattern(img: np.ndarray, brand: Literal["DMC","Gamma","Anchor","auto"]="DMC", min_cells: int = 30) -> Pattern:
+
+def _color_distance(rgb_a: Tuple[int, int, int], rgb_b: Tuple[int, int, int]) -> float:
+    arr_a = np.array(rgb_a, dtype=float)
+    arr_b = np.array(rgb_b, dtype=float)
+    return float(np.linalg.norm(arr_a - arr_b))
+
+
+def process_image_to_pattern(
+    img: np.ndarray,
+    brand: Literal["DMC", "Gamma", "Anchor", "auto"] = "DMC",
+    min_cells: int = 30,
+) -> Pattern:
     roi = detect_pattern_roi(img)
     grid_dict = detect_and_rectify_grid(roi)
     colors = split_into_cells_and_average(roi, grid_dict)
 
-    palette = load_palette(brand if brand != "auto" else "DMC")
+    resolved_brand = brand if brand != "auto" else "DMC"
+    palette = load_palette(resolved_brand)
     kd = build_kd(palette)
 
-    # Build palette map of used colors
-    used_palette = {}
-    stitches = []
-    for (x, y), rgb in colors.items():
-        p = nearest_color(kd, rgb, palette)
-        key = (p["brand"], p["code"])
-        used_palette[key] = p
-        stitches.append(Stitch(x=int(x), y=int(y),
-                               thread=ThreadRef(brand=p["brand"], code=p["code"], name=p.get("name"))))
+    used_palette: dict[Tuple[str, str], dict] = {}
+    stitches_raw: list[dict] = []
+    counts: Counter[Tuple[str, str]] = Counter()
 
-    # Assign symbols to palette
-    palette_list = [dict(v) for v in used_palette.values()]
+    for (x, y), rgb in colors.items():
+        matched = nearest_color(kd, rgb, palette)
+        key = (matched["brand"], matched["code"])
+        used_palette[key] = matched
+        counts[key] += 1
+        stitches_raw.append({"x": int(x), "y": int(y), "key": key})
+
+    if counts and min_cells > 1:
+        major_keys = {key for key, count in counts.items() if count >= min_cells}
+        if not major_keys:
+            major_keys = set(counts.keys())
+        palette_rgb = {key: tuple(used_palette[key].get("rgb", (0, 0, 0))) for key in used_palette}
+        for stitch in stitches_raw:
+            if stitch["key"] in major_keys:
+                continue
+            if not major_keys:
+                continue
+            origin_rgb = palette_rgb[stitch["key"]]
+            target = min(major_keys, key=lambda k: _color_distance(palette_rgb[k], origin_rgb))
+            stitch["key"] = target
+        used_palette = {key: used_palette[key] for key in major_keys}
+    final_counts = Counter()
+    for stitch in stitches_raw:
+        final_counts[stitch["key"]] += 1
+
+    palette_items = sorted(used_palette.items(), key=lambda item: final_counts.get(item[0], 0), reverse=True)
+    palette_list = [dict(value) for _, value in palette_items]
     palette_list = assign_symbols_to_palette(palette_list)
+    thread_map: dict[Tuple[str, str], ThreadRef] = {}
+    for entry in palette_list:
+        rgb_tuple = tuple(int(v) for v in entry.get("rgb", (0, 0, 0)))
+        thread = ThreadRef(
+            brand=entry["brand"],
+            code=entry["code"],
+            name=entry.get("name"),
+            rgb=rgb_tuple,
+            symbol=entry.get("symbol"),
+        )
+        thread_map[(thread.brand, thread.code)] = thread
+
+    stitches: list[Stitch] = []
+    for stitch in stitches_raw:
+        thread = thread_map.get(stitch["key"])
+        if not thread:
+            continue
+        stitches.append(Stitch(x=stitch["x"], y=stitch["y"], thread=thread))
 
     pattern = Pattern(
-        canvasGrid=CanvasGrid(width=int(grid_dict["width"]), height=int(grid_dict["height"])),
-        palette=[ThreadRef(**{**p, "rgb": tuple(p.get("rgb", (0,0,0)))}) for p in palette_list],
+        canvasGrid=CanvasGrid(
+            width=int(grid_dict["width"]),
+            height=int(grid_dict["height"]),
+        ),
+        palette=list(thread_map.values()),
         stitches=stitches,
-        meta={"title": "Generated Pattern", "dpi": 300}
+        meta={"title": "Generated Pattern", "dpi": 300, "brand": resolved_brand},
     )
     return pattern
 
+
 def render_preview(pattern: dict, mode: str = "color") -> bytes:
+    if hasattr(pattern, "dict"):
+        pattern = pattern.dict()
     w = pattern["canvasGrid"]["width"]
     h = pattern["canvasGrid"]["height"]
-    cell = 8  # px per cell
-    img = np.full((h*cell, w*cell, 3), 255, dtype=np.uint8)
-    # brand/code -> rgb lookup (fallback gray)
-    color_map = {}
+    cell = 20  # px per cell for a clearer preview
+    img = np.full((h * cell, w * cell, 3), 255, dtype=np.uint8)
+
+    color_map: dict[Tuple[str, str], Tuple[int, int, int]] = {}
+    symbol_map: dict[Tuple[str, str], str] = {}
     for p in pattern["palette"]:
-        rgb = p.get("rgb") or (120,120,120)
-        color_map[(p["brand"], p["code"])] = tuple(int(v) for v in rgb)
+        rgb = p.get("rgb") or (120, 120, 120)
+        key = (p["brand"], p["code"])
+        color_map[key] = tuple(int(v) for v in rgb)
+        if p.get("symbol"):
+            symbol_map[key] = p["symbol"]
+
     for s in pattern["stitches"]:
         x, y = s["x"], s["y"]
         key = (s["thread"]["brand"], s["thread"]["code"])
-        rgb = color_map.get(key, (120,120,120))
-        img[y*cell:(y+1)*cell, x*cell:(x+1)*cell] = rgb
-    # TODO: symbols overlay for mode=="symbols"
+        rgb = color_map.get(key, (200, 200, 200))
+        img[y * cell : (y + 1) * cell, x * cell : (x + 1) * cell] = rgb
+
     pil = Image.fromarray(img, mode="RGB")
+
+    if mode == "symbols":
+        draw = ImageDraw.Draw(pil)
+        try:
+            font = ImageFont.truetype("DejaVuSans.ttf", max(12, cell - 6))
+        except Exception:  # pragma: no cover - optional font availability
+            font = ImageFont.load_default()
+        for s in pattern["stitches"]:
+            x, y = s["x"], s["y"]
+            key = (s["thread"]["brand"], s["thread"]["code"])
+            symbol = symbol_map.get(key, "?")
+            try:
+                bbox = font.getbbox(symbol)
+                text_width = bbox[2] - bbox[0]
+                text_height = bbox[3] - bbox[1]
+            except Exception:  # pragma: no cover
+                text_width = font.getlength(symbol) if hasattr(font, "getlength") else len(symbol) * (cell / 2)
+                text_height = getattr(font, "size", cell / 2)
+            draw_x = x * cell + (cell - text_width) / 2
+            draw_y = y * cell + (cell - text_height) / 2
+            draw.text((draw_x, draw_y), symbol, fill=(0, 0, 0), font=font)
+
     buf = io.BytesIO()
     pil.save(buf, format="PNG")
     return buf.getvalue()
