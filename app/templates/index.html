@@ -37,5 +37,44 @@
 
     <button type="submit">Создать схему</button>
   </form>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Stitch Converter</title>
+  <style>
+    body { font-family: sans-serif; margin: 2em; background: #fafafa; }
+    form { margin-bottom: 2em; }
+    input[type=file] { margin: 1em 0; }
+    img { max-width: 400px; border: 1px solid #ccc; margin-top: 1em; }
+  </style>
+</head>
+<body>
+  <h1>🎨 Stitch Converter</h1>
+  <form action="/upload" method="post" enctype="multipart/form-data">
+    <label>Загрузите изображение:</label><br>
+    <input type="file" name="file" accept="image/*" required>
+    <br><br>
+    <label>Марка ниток:</label>
+    <select name="brand">
+      <option value="DMC">DMC</option>
+    </select>
+    <br><br>
+    <label>Мин. ячеек на цвет:</label>
+    <input type="number" name="min_cells_per_color" value="30">
+    <br><br>
+    <button type="submit">Создать схему</button>
+  </form>
+
+  {% if job %}
+    <h2>Результат</h2>
+    <p><b>ID:</b> {{ job.job_id }}</p>
+    <p><b>Статус:</b> {{ job.status }}</p>
+    <img src="{{ preview_url }}" alt="Preview">
+    <p>
+      <a href="{{ pdf_url }}" download>📄 Скачать PDF</a> |
+      <a href="{{ saga_url }}" download>📦 Скачать SAGA</a>
+    </p>
+  {% endif %}
 </body>
 </html>

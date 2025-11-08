@@ -66,6 +66,11 @@ async def create_job(
         min_cells=min_cells_per_color,
         detail_level=detail_level,
     )
+        meta={"filename": file.filename, "brand": brand, "min_cells": min_cells_per_color},
+    )
+
+    # Synchronous pipeline for scaffold (replace with background tasks if needed)
+    pattern = process_image_to_pattern(np.array(img), brand=brand, min_cells=min_cells_per_color)
     job_store.update(job_id, status="done", progress=1.0)
     grid = {"width": pattern.canvasGrid.width, "height": pattern.canvasGrid.height}
     job_store.set_pattern(job_id, pattern.dict(), grid=grid)

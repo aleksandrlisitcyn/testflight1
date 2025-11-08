@@ -82,6 +82,25 @@ def process_image_to_pattern(
     # лёгкое размытие и повышение контраста
     image = cv2.GaussianBlur(image, (3, 3), 0)
     image = cv2.convertScaleAbs(image, alpha=contrast_alpha, beta=contrast_beta)
+) -> Pattern:
+    # === Улучшено: адаптивное масштабирование ===
+    # определяем длину большей стороны
+    h, w = image.shape[:2]
+    max_side = max(h, w)
+
+    # определяем количество клеток в зависимости от размера изображения
+    # для крупных изображений — до 400-600 клеток, для мелких — не уменьшаем
+    target_cells = min(max_side // 4, 600)
+    if target_cells <= 0:
+        target_cells = max_side
+
+    # изменяем размер, сохраняя пропорции
+    image = resize_to_max_cells(image, target_cells)
+
+    # небольшое сглаживание для уменьшения шумов
+    import cv2
+
+    image = cv2.GaussianBlur(image, (3, 3), 0)
 
     roi = detect_pattern_roi(image)
     grid_dict = detect_and_rectify_grid(roi)
@@ -105,6 +124,8 @@ def process_image_to_pattern(
     effective_min_cells = max(1, int(round(min_cells * min_cells_bias)))
     if counts and effective_min_cells > 1:
         major_keys = {key for key, count in counts.items() if count >= effective_min_cells}
+    if counts and min_cells > 1:
+        major_keys = {key for key, count in counts.items() if count >= min_cells}
         if not major_keys:
             major_keys = set(counts.keys())
         palette_rgb = {key: tuple(used_palette[key].get("rgb", (0, 0, 0))) for key in used_palette}
@@ -178,6 +199,13 @@ def process_image_to_pattern(
     pattern.canvasGrid.width = int(image.shape[1])
     pattern.canvasGrid.height = int(image.shape[0])
     pattern.meta["detail_level"] = detail_level
+    if len({s.thread.code for s in pattern.stitches}) < 5 and min_cells > 1:
+        return process_image_to_pattern(
+            image,
+            brand=brand,
+            min_cells=max(1, int(min_cells * 0.5)),
+        )
+
     return pattern
 
 
