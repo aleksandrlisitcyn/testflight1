@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Stitch Converter · Admin</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2rem; background: #f7f7f9; }
+        h1 { margin-bottom: 1rem; }
+        form.filters { display: flex; gap: 1rem; margin-bottom: 1.5rem; }
+        form.filters input, form.filters select { padding: 0.4rem 0.6rem; }
+        table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+        th, td { padding: 0.6rem 0.8rem; border-bottom: 1px solid #e0e0e0; text-align: left; }
+        th { background: #fafafa; font-weight: 600; }
+        .status-badge { padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.85rem; text-transform: uppercase; }
+        .status-processing { background: #fff3cd; color: #8a6d3b; }
+        .status-done { background: #d1e7dd; color: #0f5132; }
+        .status-failed { background: #f8d7da; color: #842029; }
+        .meta { color: #555; font-size: 0.85rem; }
+        .empty { padding: 1.5rem; text-align: center; color: #666; }
+    </style>
+</head>
+<body>
+    <h1>Admin Dashboard</h1>
+    <form class="filters" method="get">
+        <label>
+            Status
+            <select name="status">
+                <option value="" {% if not status %}selected{% endif %}>All</option>
+                <option value="processing" {% if status == 'processing' %}selected{% endif %}>Processing</option>
+                <option value="done" {% if status == 'done' %}selected{% endif %}>Done</option>
+                <option value="failed" {% if status == 'failed' %}selected{% endif %}>Failed</option>
+            </select>
+        </label>
+        <label>
+            Search
+            <input type="search" name="query" placeholder="ID, filename…" value="{{ query }}">
+        </label>
+        <button type="submit">Apply</button>
+    </form>
+
+    {% if jobs %}
+    <table>
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Status</th>
+                <th>Progress</th>
+                <th>Meta</th>
+                <th>Created</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for job in jobs %}
+            <tr>
+                <td><code>{{ job.job_id }}</code></td>
+                <td><span class="status-badge status-{{ job.status }}">{{ job.status }}</span></td>
+                <td>{{ '%.0f'|format(job.progress * 100) }}%</td>
+                <td class="meta">
+                    {% for key, value in job.meta.items() %}
+                        <div><strong>{{ key }}:</strong> {{ value }}</div>
+                    {% endfor %}
+                </td>
+                <td>{{ job.created_at | datetimeformat }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty">No jobs yet. Upload a pattern to see it here.</div>
+    {% endif %}
+
+    <script>
+        // Poll job API to keep the dashboard fresh
+        setInterval(async () => {
+            const params = new URLSearchParams(window.location.search);
+            const response = await fetch(`/admin/jobs?${params.toString()}`);
+            if (!response.ok) {
+                return;
+            }
+            const data = await response.json();
+            if (!Array.isArray(data.items)) {
+                return;
+            }
+            // Simple in-place refresh by reloading when data changes
+            const currentIds = Array.from(document.querySelectorAll('tbody tr code')).map(el => el.textContent);
+            const nextIds = data.items.map(item => item.job_id);
+            if (currentIds.length !== nextIds.length || currentIds.some((id, idx) => id !== nextIds[idx])) {
+                window.location.reload();
+            }
+        }, 10000);
+    </script>
+</body>
+</html>

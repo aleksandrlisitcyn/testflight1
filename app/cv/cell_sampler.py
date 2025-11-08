@@ -3,8 +3,8 @@ import numpy as np
 def split_into_cells_and_average(img: np.ndarray, grid: dict) -> dict:
     h, w = img.shape[:2]
     gw, gh = grid['width'], grid['height']
-    cell_w = max(1, w // gw)
-    cell_h = max(1, h // gh)
+    cell_w = max(1, int(round(w / gw)))
+    cell_h = max(1, int(round(h / gh)))
     colors = {}
     for y in range(gh):
         for x in range(gw):
