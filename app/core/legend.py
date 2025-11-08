@@ -27,7 +27,16 @@ def build_legend(pattern, *, force: bool = False) -> List[dict]:
         if not isinstance(data, dict):
             return None
         if "thread" in data and isinstance(data["thread"], dict):
-            return _thread_info(data["thread"])
+            inner = _thread_info(data["thread"])
+            if not inner:
+                return None
+            info = dict(inner)
+            for key in ("brand", "code", "name", "symbol", "rgb"):
+                if data.get(key) is not None:
+                    info[key] = data[key]
+            if info.get("brand") and info.get("code"):
+                return info
+            return None
         brand = data.get("brand")
         code = data.get("code")
         if not (brand and code):
