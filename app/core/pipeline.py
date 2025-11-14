@@ -153,6 +153,18 @@ def process_image_to_pattern(
     for stitch in stitches_raw:
         final_counts[stitch["key"]] += 1
 
+    background_key: Tuple[str, str] | None = None
+    if final_counts:
+        total_cells = sum(final_counts.values())
+        key, count = final_counts.most_common(1)[0]
+        if len(final_counts) > 1 and count >= max(50, int(total_cells * 0.4)):
+            background_key = key
+
+    if background_key is not None:
+        stitches_raw = [s for s in stitches_raw if s["key"] != background_key]
+        final_counts.pop(background_key, None)
+        used_palette.pop(background_key, None)
+
     palette_items = sorted(
         used_palette.items(),
         key=lambda item: final_counts.get(item[0], 0),
