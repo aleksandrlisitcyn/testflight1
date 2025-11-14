@@ -1,13 +1,7 @@
 fastapi
-uvicorn
-opencv-python
-numpy
-scipy
-pillow
-scikit-learn
 jinja2
+requests
+uvicorn
+httpx
+scikit-learn
 weasyprint
-boto3
-python-dotenv
-pydantic
-pytest

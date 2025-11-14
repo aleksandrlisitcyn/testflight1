@@ -1,0 +1,25 @@
+# Byte-compiled
+__pycache__/
+*.pyc
+
+# Virtual env
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Local data & generated patterns
+app/data/
+data/
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.saga
+uvicorn.log
+
+# Misc
+.DS_Store
+

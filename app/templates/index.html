@@ -6,36 +6,53 @@
   <style>
     body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f5f5; }
     form { background: #fff; padding: 1.5rem; border-radius: 8px; max-width: 420px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
-    input, select { width: 100%; padding: 0.5rem; margin-bottom: 1rem; }
-    button { padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input, select { width: 100%; padding: 0.5rem; margin-top: 0.4rem; }
+    button { padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; margin-top: 1rem; }
+    img { max-width: 500px; margin-top: 1rem; border: 1px solid #ccc; }
+    .result { background: #fff; padding: 1.5rem; border-radius: 8px; margin-top: 2rem; max-width: 600px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+    a { text-decoration: none; font-weight: 600; }
   </style>
 </head>
 <body>
-  <h1>Загрузка изображения</h1>
-  <form id="upload-form" enctype="multipart/form-data" method="post" action="/api/v1/jobs">
-    <label>Изображение:</label>
-    <input type="file" name="file" accept="image/png,image/jpeg" required>
 
-    <label>Бренд:</label>
+  <h1>Создание схемы вышивки</h1>
+
+  <!-- Upload form -->
+  <form action="/upload" method="post" enctype="multipart/form-data">
+    <label>Изображение:</label>
+    <input type="file" name="file" accept="image/*" required>
+
+    <label>Марка ниток:</label>
     <select name="brand">
       <option value="DMC" selected>DMC</option>
       <option value="Gamma">Gamma</option>
       <option value="Anchor">Anchor</option>
-      <option value="auto">Авто</option>
+      <option value="auto">Автоматически</option>
     </select>
 
     <label>Мин. ячеек на цвет:</label>
-    <input type="number" name="min_cells_per_color" value="30" min="1">
-
-    <label>Детализация:</label>
-    <select name="detail_level">
-      <option value="low">Низкая</option>
-      <option value="medium" selected>Средняя</option>
-      <option value="high">Высокая</option>
-    </select>
+    <input type="number" name="min_cells_per_color" min="1" value="30">
 
     <button type="submit">Создать схему</button>
   </form>
+
+  {% if job %}
+  <div class="result">
+    <h2>Результат</h2>
+    <p><b>ID задачи:</b> {{ job.job_id }}</p>
+    <p><b>Статус:</b> {{ job.status }}</p>
+
+    {% if preview_url %}
+      <img src="{{ preview_url }}" alt="Предпросмотр">
+    {% endif %}
+
+    <p>
+      <a href="{{ pdf_url }}" download>📄 Скачать PDF</a> &nbsp; | &nbsp;
+      <a href="{{ saga_url }}" download>📦 Скачать SAGA</a>
+    </p>
+  </div>
+  {% endif %}
+
 </body>
 </html>
