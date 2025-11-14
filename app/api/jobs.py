@@ -68,9 +68,7 @@ async def create_job(
         },
     )
 
-    # ============================================
-    # PROCESS PATTERN
-    # ============================================
+    # ========== PROCESS PATTERN ==========
     pattern = process_image_to_pattern(
         np.array(img),
         brand=brand,
@@ -79,9 +77,7 @@ async def create_job(
     )
     pattern_dict = pattern.dict()
 
-    # ============================================
-    # PREVIEW (safe, high-res)
-    # ============================================
+    # ========== PREVIEW SAFE ==========
     preview_bytes = None
     try:
         preview_obj = render_preview(pattern, mode="color")
@@ -117,21 +113,17 @@ async def create_job(
             buf = io.BytesIO()
             preview_img.save(buf, format="PNG")
             preview_bytes = buf.getvalue()
-
     except Exception as e:
         print(f"[WARN] preview generation failed: {e}")
 
-    # ============================================
-    # SAVE PREVIEW & PATTERN
-    # ============================================
+    # Store pattern
     storage = get_storage()
-
     storage.save_json(f"{job_id}/pattern.json", pattern_dict)
 
     if preview_bytes:
         storage.save_bytes(f"{job_id}/preview.png", preview_bytes)
 
-    # Update job store
+    # Update job
     job_store.update(job_id, status="done", progress=1.0)
     grid = {
         "width": pattern.canvasGrid.width,
@@ -139,9 +131,7 @@ async def create_job(
     }
     job_store.set_pattern(job_id, pattern_dict, grid=grid)
 
-    # ============================================
-    # AUTO-EXPORT PDF + SAGA
-    # ============================================
+    # Auto-export PDF + Saga
     try:
         pdf_bytes = export_pdf(pattern_dict, preview=preview_bytes)
         storage.save_bytes(f"{job_id}/pattern.pdf", pdf_bytes)
@@ -149,7 +139,6 @@ async def create_job(
         saga_data = export_saga(pattern_dict)
         saga_bytes = saga_data.encode("utf-8") if isinstance(saga_data, str) else saga_data
         storage.save_bytes(f"{job_id}/pattern.saga", saga_bytes)
-
     except Exception as e:
         print(f"[WARN] Export failed: {e}")
 
@@ -165,13 +154,14 @@ async def get_job(job_id: str):
     record = job_store.get(job_id)
     if not record:
         raise HTTPException(status_code=404, detail="Job not found")
+
     job = record.to_dict(include_pattern=True)
-    return JobStatus(**{
-        "status": job["status"],
-        "progress": job["progress"],
-        "meta": job.get("meta", {}),
-        "grid": job.get("grid"),
-    })
+    return JobStatus(
+        status=job["status"],
+        progress=job["progress"],
+        meta=job.get("meta", {}),
+        grid=job.get("grid"),
+    )
 
 
 # =====================================================================
@@ -184,8 +174,7 @@ async def get_legend(job_id: str):
     if not record or record.status != "done" or not record.pattern:
         raise HTTPException(status_code=404, detail="Job not ready")
 
-    legend = build_legend(record.pattern)
-    return legend
+    return build_legend(record.pattern)
 
 
 # =====================================================================
@@ -208,3 +197,78 @@ async def preview(job_id: str, mode: Literal["color", "symbols"] = "color"):
     except Exception as e:
         print(f"[WARN] preview failed: {e}")
         raise HTTPException(status_code=500, detail="Preview render failed")
+
+
+# =====================================================================
+#   EXPORT
+# =====================================================================
+
+@router.post("/jobs/{job_id}/export")
+async def export(job_id: str, req: ExportRequest):
+    record = job_store.get(job_id)
+    if not record or record.status != "done" or not record.pattern:
+        raise HTTPException(status_code=404, detail="Job not ready")
+
+    pattern = record.pattern
+    storage = get_storage()
+    links = []
+
+    for fmt in req.formats:
+        if fmt == "saga":
+            data = export_saga(pattern)
+            path = f"{job_id}/pattern.saga"
+            storage.save_bytes(path, data.encode("utf-8"))
+            links.append({"format": "saga", "path": path})
+
+        elif fmt == "pdf":
+            pdf = export_pdf(pattern)
+            path = f"{job_id}/pattern.pdf"
+            storage.save_bytes(path, pdf)
+            links.append({"format": "pdf", "path": path})
+
+        elif fmt == "json":
+            data = export_json(pattern)
+            path = f"{job_id}/pattern.json"
+            storage.save_bytes(path, data.encode("utf-8"))
+            links.append({"format": "json", "path": path})
+
+        elif fmt == "csv":
+            data = export_csv(pattern)
+            path = f"{job_id}/pattern.csv"
+            storage.save_bytes(path, data.encode("utf-8"))
+            links.append({"format": "csv", "path": path})
+
+        elif fmt == "xsd":
+            data = export_xsd(pattern)
+            path = f"{job_id}/pattern.xsd"
+            storage.save_bytes(path, data.encode("utf-8"))
+            links.append({"format": "xsd", "path": path})
+
+        elif fmt == "xsp":
+            data = export_xsp(pattern)
+            path = f"{job_id}/pattern.xsp"
+            storage.save_bytes(path, data.encode("utf-8"))
+            links.append({"format": "xsp", "path": path})
+
+        elif fmt == "css":
+            data = export_css(pattern)
+            path = f"{job_id}/pattern.css"
+            storage.save_bytes(path, data.encode("utf-8"))
+            links.append({"format": "css", "path": path})
+
+        elif fmt == "dize":
+            payload = export_dize(pattern)
+            path = f"{job_id}/pattern.dize"
+            storage.save_bytes(path, payload)
+            links.append({"format": "dize", "path": path})
+
+        elif fmt == "png":
+            payload = export_png(pattern)
+            path = f"{job_id}/pattern.png"
+            storage.save_bytes(path, payload)
+            links.append({"format": "png", "path": path})
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported export format: {fmt}")
+
+    return {"files": links}
