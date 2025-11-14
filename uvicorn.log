@@ -1,0 +1,93 @@
+nohup: ignoring input
+INFO:     Will watch for changes in these directories: ['/workspaces/testflight1']
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [37490] using StatReload
+INFO:     Started server process [37516]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:36148 - "HEAD /data/22737b8c-2d1a-4985-afd9-3079daa32f58/pattern.pdf HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [37516]
+INFO:     Started server process [38576]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [38576]
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Started server process [39376]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Started server process [39477]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [39477]
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Started server process [39589]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Started server process [39684]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/main.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [39684]
+INFO:     Started server process [39827]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:58056 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58070 - "POST /api/v1/jobs?brand=DMC&min_cells_per_color=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58056 - "POST /upload HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58056 - "GET /api/v1/jobs/d520f0a3-9a28-4a30-af7e-5a86c9c1ee3b/preview?mode=color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58056 - "GET /data/d520f0a3-9a28-4a30-af7e-5a86c9c1ee3b/pattern.pdf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:58064 - "GET /data/d520f0a3-9a28-4a30-af7e-5a86c9c1ee3b/pattern.saga HTTP/1.1" 200 OK
+WARNING:  StatReload detected changes in 'app/export/pdf_exporter.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [39827]
+WARNING:  StatReload detected changes in 'app/export/pdf_exporter.py'. Reloading...
+INFO:     Started server process [41108]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Started server process [41225]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/api/jobs.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [41225]
+WARNING:  StatReload detected changes in 'app/api/jobs.py'. Reloading...
+INFO:     Started server process [41751]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Started server process [41851]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app/api/jobs.py'. Reloading...
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [41851]
+INFO:     Started server process [41953]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     127.0.0.1:53826 - "POST /api/v1/jobs?brand=DMC&min_cells_per_color=30 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53814 - "POST /upload HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53814 - "GET /api/v1/jobs/a2e587f1-798a-4dd0-be23-e69d7d0cabe7/preview?mode=color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37916 - "POST /api/v1/jobs?brand=DMC&min_cells_per_color=5 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53822 - "POST /upload HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53822 - "GET /api/v1/jobs/a49b5149-793c-41c3-be0b-82a31290c0c8/preview?mode=color HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53822 - "GET /data/a49b5149-793c-41c3-be0b-82a31290c0c8/pattern.pdf HTTP/1.1" 200 OK

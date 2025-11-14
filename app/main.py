@@ -31,7 +31,7 @@ def health():
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 from fastapi import Request, UploadFile, Form
-import requests
+from fastapi import File
 import httpx
 
 from pathlib import Path
@@ -45,9 +45,9 @@ def home(request: Request):
 @app.post("/upload", response_class=HTMLResponse)
 async def upload_image(
     request: Request,
-    file: UploadFile,
+    file: UploadFile = File(...),
     brand: str = Form("DMC"),
-    min_cells_per_color: int = Form(30)
+    min_cells_per_color: int = Form(30),
 ):
     files = {"file": (file.filename, await file.read(), file.content_type)}
     params = {"brand": brand, "min_cells_per_color": min_cells_per_color}
