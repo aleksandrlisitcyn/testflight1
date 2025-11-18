@@ -1,0 +1,8 @@
+-r requirements.txt
+black
+mypy
+pre-commit
+pytest
+pytest-cov
+ruff
+types-Pillow

@@ -1,6 +1,8 @@
-from pathlib import Path
 import json
+from pathlib import Path
+
 from ..settings import DATA_DIR
+
 
 class FSStorage:
     def __init__(self):

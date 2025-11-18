@@ -1,11 +1,30 @@
 from __future__ import annotations
 
+import logging
+from dataclasses import dataclass
+from typing import List, Literal, Optional, Tuple
+
 import numpy as np
 
 try:  # pragma: no cover - optional dependency
     import cv2  # type: ignore
 except Exception:  # pragma: no cover
     cv2 = None  # type: ignore
+
+logger = logging.getLogger(__name__)
+
+from ..core.types import PatternMode
+
+
+@dataclass
+class ROIResult:
+    """Represents a detected region of interest for the stitch grid."""
+
+    roi: np.ndarray
+    confidence: float
+    corners: Optional[np.ndarray] = None
+    transform: Optional[np.ndarray] = None
+    bounding_box: Optional[Tuple[int, int, int, int]] = None
 
 
 def _order_points(pts: np.ndarray) -> np.ndarray:
@@ -19,185 +38,293 @@ def _order_points(pts: np.ndarray) -> np.ndarray:
     return ordered
 
 
-def detect_pattern_roi(img: np.ndarray) -> np.ndarray:
-    """Extract and rectify the region that contains the stitch grid."""
-    if cv2 is None:
-        return img.copy()
-
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    if not contours:
-        return img.copy()
-
-    contour = max(contours, key=cv2.contourArea)
-    epsilon = 0.02 * cv2.arcLength(contour, True)
-    approx = cv2.approxPolyDP(contour, epsilon, True)
-
-    if len(approx) >= 4:
-        pts = approx.reshape(-1, 2).astype(np.float32)
-        ordered = _order_points(pts[:4])
-        width_top = np.linalg.norm(ordered[0] - ordered[1])
-        width_bottom = np.linalg.norm(ordered[2] - ordered[3])
-        width = max(int((width_top + width_bottom) / 2), 1)
-        height_left = np.linalg.norm(ordered[0] - ordered[3])
-        height_right = np.linalg.norm(ordered[1] - ordered[2])
-        height = max(int((height_left + height_right) / 2), 1)
-        dst = np.array(
-            [[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]],
-            dtype=np.float32,
-        )
-        matrix = cv2.getPerspectiveTransform(ordered, dst)
-        warped = cv2.warpPerspective(img, matrix, (width, height))
-        return warped
-
-    x, y, w, h = cv2.boundingRect(contour)
-    pad = int(0.02 * max(w, h))
-    return img[max(y - pad, 0) : min(y + h + pad, img.shape[0]), max(x - pad, 0) : min(x + w + pad, img.shape[1])].copy()
-
-
-def _estimate_cells(length: int, projection: np.ndarray) -> int:
-    if length <= 0:
-        return 1
-    threshold = projection.max() * 0.4 if projection.max() > 0 else projection.mean()
-    peaks = np.where(projection >= threshold)[0]
-    if len(peaks) < 2:
-        return max(1, min(200, length // 20 or 1))
-    diffs = np.diff(peaks)
-    diffs = diffs[diffs > 1]
-    if diffs.size == 0:
-        return max(1, min(200, length // 20 or 1))
-    spacing = int(np.median(diffs))
-    if spacing <= 0:
-        spacing = max(1, length // 20)
-    return max(1, min(400, int(round(length / spacing))))
-
-
-def detect_and_rectify_grid(img: np.ndarray) -> dict:
-    """
-    Detect real stitch grid using probabilistic Hough lines.
-
-    Returns dict with:
-      - width: number of cells in X
-      - height: number of cells in Y
-      - cell_w, cell_h: estimated cell size in pixels
-      - roi: cropped rect (numpy array) that contains the grid
-    """
-    h, w = img.shape[:2]
-    if cv2 is None:
-        return {
-            "width": max(1, w // 10),
-            "height": max(1, h // 10),
-            "cell_w": 10,
-            "cell_h": 10,
-            "roi": img.copy(),
-        }
-
-    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-    blur = cv2.GaussianBlur(gray, (3, 3), 0)
-    edges = cv2.Canny(blur, 50, 150, apertureSize=3)
-
-    lines = cv2.HoughLinesP(
-        edges,
-        rho=1,
-        theta=np.pi / 180,
-        threshold=max(40, min(200, (w + h) // 50)),
-        minLineLength=max(20, min(w, h) // 20),
-        maxLineGap=max(5, min(w, h) // 80),
+def _fallback_roi(img: np.ndarray) -> ROIResult:
+    gray = img.mean(axis=2)
+    mask = gray < np.percentile(gray, 98)
+    rows = np.where(mask.any(axis=1))[0]
+    cols = np.where(mask.any(axis=0))[0]
+    if rows.size and cols.size:
+        y0, y1 = int(rows[0]), int(rows[-1] + 1)
+        x0, x1 = int(cols[0]), int(cols[-1] + 1)
+        pad_y = max(2, int(0.02 * img.shape[0]))
+        pad_x = max(2, int(0.02 * img.shape[1]))
+        y0 = max(0, y0 - pad_y)
+        y1 = min(img.shape[0], y1 + pad_y)
+        x0 = max(0, x0 - pad_x)
+        x1 = min(img.shape[1], x1 + pad_x)
+        roi = img[y0:y1, x0:x1].copy()
+        return ROIResult(roi=roi, confidence=0.35, bounding_box=(x0, y0, x1, y1))
+    return ROIResult(
+        roi=img.copy(),
+        confidence=0.2,
+        bounding_box=(0, 0, img.shape[1], img.shape[0]),
     )
 
-    if lines is None or len(lines) < 8:
-        # fallback: coarse estimate
+
+def detect_pattern_roi(img: np.ndarray, pattern_mode: PatternMode = "color") -> ROIResult:
+    """
+    Extract and rectify the region that contains the stitch grid.
+    pattern_mode lets us tweak how aggressively we smooth / close details. For antique charts we
+    keep it conservative by default and preserve ink strokes in symbol-heavy scans.
+    """
+    if img.size == 0:
+        return ROIResult(roi=img.copy(), confidence=0.0)
+
+    if cv2 is None:  # pragma: no cover - fallback when cv2 is unavailable
+        return _fallback_roi(img)
+
+    orig_h, orig_w = img.shape[:2]
+    scale = 900.0 / float(max(orig_h, orig_w))
+    scale = min(1.0, max(scale, 0.2))
+    working = (
+        cv2.resize(img, (int(orig_w * scale), int(orig_h * scale))) if scale < 1 else img.copy()
+    )
+
+    gray = cv2.cvtColor(working, cv2.COLOR_RGB2GRAY)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    blur_kernel = 5
+    close_iterations = 2
+    thresh_block = 35
+    thresh_c = 4
+    if pattern_mode == "symbol":
+        blur_kernel = 3
+        close_iterations = 1
+        thresh_block = 25
+        thresh_c = 2
+    elif pattern_mode == "mixed":
+        close_iterations = 2
+        blur_kernel = 5
+    if blur_kernel % 2 == 0:
+        blur_kernel += 1
+
+    blurred = cv2.GaussianBlur(enhanced, (blur_kernel, blur_kernel), 0)
+
+    thresh = cv2.adaptiveThreshold(
+        blurred,
+        255,
+        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        cv2.THRESH_BINARY_INV,
+        max(3, thresh_block),
+        thresh_c,
+    )
+    edges = cv2.Canny(blurred, 40, 120)
+    mask = cv2.bitwise_or(thresh, edges)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=close_iterations)
+
+    contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        logger.debug("ROI detection: no contours found, falling back to heuristic crop")
+        return _fallback_roi(img)
+
+    best_roi = None
+    best_conf = 0.0
+
+    working_area = working.shape[0] * working.shape[1]
+    scale_back = 1.0 / scale
+
+    for contour in sorted(contours, key=cv2.contourArea, reverse=True)[:5]:
+        area = cv2.contourArea(contour)
+        if area <= 0:
+            continue
+        contour_conf = float(area / float(working_area))
+        epsilon = 0.015 * cv2.arcLength(contour, True)
+        approx = cv2.approxPolyDP(contour, epsilon, True)
+
+        bbox = cv2.boundingRect(approx)
+        pad = int(0.01 * max(bbox[2], bbox[3]))
+        x, y, w_box, h_box = bbox
+        x0 = max(0, x - pad)
+        y0 = max(0, y - pad)
+        x1 = min(working.shape[1], x + w_box + pad)
+        y1 = min(working.shape[0], y + h_box + pad)
+
+        ordered = None
+        matrix = None
+        roi_section: np.ndarray
+        confidence = contour_conf
+
+        if len(approx) >= 4:
+            pts = approx.reshape(-1, 2).astype(np.float32)
+            ordered = _order_points(pts[:4])
+            width_top = np.linalg.norm(ordered[0] - ordered[1])
+            width_bottom = np.linalg.norm(ordered[2] - ordered[3])
+            width = max(int((width_top + width_bottom) / 2), 1)
+            height_left = np.linalg.norm(ordered[0] - ordered[3])
+            height_right = np.linalg.norm(ordered[1] - ordered[2])
+            height = max(int((height_left + height_right) / 2), 1)
+            dst = np.array(
+                [[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]],
+                dtype=np.float32,
+            )
+            matrix = cv2.getPerspectiveTransform(ordered, dst)
+            abs_pts = ordered * scale_back
+            abs_matrix = cv2.getPerspectiveTransform(abs_pts, dst)
+            warped = cv2.warpPerspective(img, abs_matrix, (width, height))
+            matrix = abs_matrix
+            roi_section = warped
+            confidence *= 1.2
+        else:
+            abs_box = (
+                int(round(x0 * scale_back)),
+                int(round(y0 * scale_back)),
+                int(round(x1 * scale_back)),
+                int(round(y1 * scale_back)),
+            )
+            x0_abs, y0_abs, x1_abs, y1_abs = abs_box
+            roi_section = img[y0_abs:y1_abs, x0_abs:x1_abs]
+
+        if confidence > best_conf:
+            abs_box = (
+                int(round(x0 * scale_back)),
+                int(round(y0 * scale_back)),
+                int(round(x1 * scale_back)),
+                int(round(y1 * scale_back)),
+            )
+            best_roi = ROIResult(
+                roi=roi_section.copy(),
+                confidence=float(min(1.0, confidence)),
+                corners=ordered * scale_back if ordered is not None else None,
+                transform=matrix,
+                bounding_box=abs_box,
+            )
+            best_conf = confidence
+
+    if best_roi is None:
+        return _fallback_roi(img)
+
+    if best_roi.roi.size == 0:
+        logger.warning("ROI detection produced empty crop, falling back to original")
+        return ROIResult(roi=img.copy(), confidence=0.1, bounding_box=(0, 0, orig_w, orig_h))
+
+    return best_roi
+
+
+def _smooth_signal(signal: np.ndarray, window: int) -> np.ndarray:
+    if window <= 1:
+        return signal
+    kernel = np.ones(window, dtype=float) / float(window)
+    return np.convolve(signal, kernel, mode="same")
+
+
+def _peak_centers(mask: np.ndarray) -> List[int]:
+    centers: List[int] = []
+    start = None
+    for idx, value in enumerate(mask):
+        if value and start is None:
+            start = idx
+        elif not value and start is not None:
+            centers.append((start + idx - 1) // 2)
+            start = None
+    if start is not None:
+        centers.append((start + len(mask) - 1) // 2)
+    return centers
+
+
+def _estimate_axis(profile: np.ndarray, length: int) -> Tuple[int, int, float]:
+    if length <= 0:
+        return 1, 1, 0.0
+    norm = profile - profile.min()
+    if norm.max() <= 1e-6:
+        fallback_cells = max(1, length // 12 or 1)
+        return fallback_cells, max(1, length // fallback_cells), 0.0
+
+    window = max(5, int(max(5, length * 0.01)))
+    if window % 2 == 0:
+        window += 1
+    smooth = _smooth_signal(norm, window)
+    threshold = np.percentile(smooth, 65)
+    mask = smooth >= threshold
+    centers = _peak_centers(mask)
+
+    if len(centers) < 3:
+        fallback_cells = max(1, length // 10 or 1)
+        return fallback_cells, max(1, int(round(length / fallback_cells))), 0.2
+
+    diffs = np.diff(centers)
+    diffs = diffs[diffs > 1]
+    if diffs.size == 0:
+        fallback_cells = max(1, length // 12 or 1)
+        return fallback_cells, max(1, int(round(length / fallback_cells))), 0.25
+
+    median_spacing = float(np.median(diffs))
+    approx_from_spacing = max(1, int(round(length / max(median_spacing, 1))))
+    approx_from_lines = max(1, len(centers) - 1)
+    approx_cells = max(1, int(round((approx_from_spacing + approx_from_lines) / 2)))
+    approx_cells = max(approx_from_lines, approx_cells)
+    approx_cell_px = max(1, int(round(length / approx_cells)))
+    spacing_std = float(np.std(diffs) / (np.mean(diffs) + 1e-6))
+    normalized_density = min(len(centers) / (approx_cells + 1e-6), 1.0)
+    confidence = float(
+        min(
+            1.0,
+            0.4 + 0.3 * normalized_density + (0.3 if spacing_std < 0.35 else 0),
+        )
+    )
+    return approx_cells, approx_cell_px, confidence
+
+
+def detect_and_rectify_grid(
+    img: np.ndarray,
+    detail_level: Literal["low", "medium", "high"] = "medium",
+    pattern_mode: PatternMode = "color",
+) -> dict:
+    """
+    Detect the stitch grid using gradient projections. Returns dict with:
+      - width / height: number of cells
+      - cell_w / cell_h: estimated cell size in pixels
+      - roi: the (already rectified) ROI image
+      - confidence: 0..1 measure of detection confidence
+
+    NOTE: detail_level is intentionally ignored for now to keep recognition deterministic. We keep
+    the argument for compatibility and only use pattern_mode for mild kernel tweaks.
+    """
+    h, w = img.shape[:2]
+    if h == 0 or w == 0:
         return {
-            "width": max(1, w // 12),
-            "height": max(1, h // 12),
-            "cell_w": max(1, w // 12),
-            "cell_h": max(1, h // 12),
+            "width": 1,
+            "height": 1,
+            "cell_w": 1,
+            "cell_h": 1,
             "roi": img.copy(),
+            "confidence": 0.0,
         }
 
-    vertical = []
-    horizontal = []
+    # detail_level is neutral – kernel depends only on chart type.
+    kernel_size = 5
+    if pattern_mode == "symbol":
+        kernel_size = 3
+    elif pattern_mode == "mixed":
+        kernel_size = 5
+    if kernel_size % 2 == 0:
+        kernel_size += 1
 
-    for l in lines.reshape(-1, 4):
-        x1, y1, x2, y2 = l
-        dx = abs(x2 - x1)
-        dy = abs(y2 - y1)
-        if dx < 3 and dy > 10:
-            vertical.append(int(round((x1 + x2) / 2)))
-        elif dy < 3 and dx > 10:
-            horizontal.append(int(round((y1 + y2) / 2)))
+    if cv2 is not None:  # pragma: no branch - prefer cv2 path when available
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        blur = cv2.GaussianBlur(gray, (kernel_size, kernel_size), 0)
+        grad_x = np.abs(cv2.Sobel(blur, cv2.CV_64F, 1, 0, ksize=3))
+        grad_y = np.abs(cv2.Sobel(blur, cv2.CV_64F, 0, 1, ksize=3))
+    else:  # pragma: no cover - fallback branch without cv2
+        gray = img.mean(axis=2)
+        kernel = np.ones(kernel_size, dtype=float) / float(kernel_size)
+        blur = np.apply_along_axis(lambda m: np.convolve(m, kernel, mode="same"), axis=0, arr=gray)
+        blur = np.apply_along_axis(lambda m: np.convolve(m, kernel, mode="same"), axis=1, arr=blur)
+        grad_x = np.abs(np.gradient(blur, axis=1))
+        grad_y = np.abs(np.gradient(blur, axis=0))
 
-    vertical = sorted(set(vertical))
-    horizontal = sorted(set(horizontal))
+    vertical_profile = grad_x.mean(axis=0)
+    horizontal_profile = grad_y.mean(axis=1)
 
-    # If insufficient lines found, try a more permissive pass
-    if len(vertical) < 2 or len(horizontal) < 2:
-        # lower thresholds and try again on a resized image
-        small = cv2.resize(blur, (max(200, w // 2), max(200, h // 2)))
-        edges2 = cv2.Canny(small, 30, 120)
-        lines2 = cv2.HoughLinesP(edges2, 1, np.pi / 180, threshold=30, minLineLength=20, maxLineGap=10)
-        if lines2 is not None:
-            for l in lines2.reshape(-1, 4):
-                x1, y1, x2, y2 = l
-                dx = abs(x2 - x1)
-                dy = abs(y2 - y1)
-                # scale back coordinates
-                sx = int(round(x1 * (w / small.shape[1])))
-                sy = int(round(y1 * (h / small.shape[0])))
-                sx2 = int(round(x2 * (w / small.shape[1])))
-                sy2 = int(round(y2 * (h / small.shape[0])))
-                if abs(sx2 - sx) < 6 and abs(sy2 - sy) > 6:
-                    vertical.append(int(round((sx + sx2) / 2)))
-                elif abs(sy2 - sy) < 6 and abs(sx2 - sx) > 6:
-                    horizontal.append(int(round((sy + sy2) / 2)))
-        vertical = sorted(set(vertical))
-        horizontal = sorted(set(horizontal))
-
-    if len(vertical) < 2 or len(horizontal) < 2:
-        # final fallback
-        return {
-            "width": max(1, w // 12),
-            "height": max(1, h // 12),
-            "cell_w": max(1, w // 12),
-            "cell_h": max(1, h // 12),
-            "roi": img.copy(),
-        }
-
-    # compute median spacing -> cell size
-    v_diffs = np.diff(vertical)
-    h_diffs = np.diff(horizontal)
-    # filter out outliers
-    if v_diffs.size == 0:
-        cell_w = max(1, w // 12)
-    else:
-        cell_w = int(max(1, np.median(v_diffs)))
-
-    if h_diffs.size == 0:
-        cell_h = max(1, h // 12)
-    else:
-        cell_h = int(max(1, np.median(h_diffs)))
-
-    width_cells = max(1, len(vertical) - 1)
-    height_cells = max(1, len(horizontal) - 1)
-
-    # ROI: crop tightly to grid lines with small padding
-    x0, x1 = vertical[0], vertical[-1]
-    y0, y1 = horizontal[0], horizontal[-1]
-    pad_x = max(2, int(cell_w * 0.1))
-    pad_y = max(2, int(cell_h * 0.1))
-    x0c = max(0, x0 - pad_x)
-    x1c = min(w, x1 + pad_x)
-    y0c = max(0, y0 - pad_y)
-    y1c = min(h, y1 + pad_y)
-
-    roi = img[y0c:y1c, x0c:x1c].copy()
+    width_cells, cell_w, conf_w = _estimate_axis(vertical_profile, w)
+    height_cells, cell_h, conf_h = _estimate_axis(horizontal_profile, h)
+    confidence = float(min(1.0, 0.3 + 0.35 * conf_w + 0.35 * conf_h))
 
     return {
-        "width": int(width_cells),
-        "height": int(height_cells),
-        "cell_w": int(cell_w),
-        "cell_h": int(cell_h),
-        "roi": roi,
+        "width": int(max(1, width_cells)),
+        "height": int(max(1, height_cells)),
+        "cell_w": int(max(1, cell_w)),
+        "cell_h": int(max(1, cell_h)),
+        "roi": img.copy(),
+        "confidence": confidence,
     }

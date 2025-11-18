@@ -1,36 +1,21 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import JSONResponse, Response
-from uuid import uuid4
-from typing import Literal, Optional
 import io
-import numpy as np
 import math
+from typing import Literal
+from uuid import uuid4
 
-from PIL import Image as PILImage, Image
+import numpy as np
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse, Response
+from PIL import Image
 
-from ..core.pipeline import process_image_to_pattern, render_preview
-from ..core.legend import build_legend
-from ..core.pattern_edit import apply_legend_updates, apply_meta_updates
 from ..core.jobs import store as job_store
-
-from ..export.saga_exporter import export_saga
+from ..core.legend import build_legend
+from ..core.pipeline import process_image_to_pattern, render_preview
 from ..export.pdf_exporter import export_pdf
-from ..export.json_exporter import export_json
-from ..export.csv_exporter import export_csv
-from ..export.xsd_exporter import export_xsd
-from ..export.xsp_exporter import export_xsp
-from ..export.css_exporter import export_css
-from ..export.dize_exporter import export_dize
-from ..export.png_exporter import export_png
-
-from ..models.api_schemas import (
-    ExportRequest,
-    JobStatus,
-    LegendUpdateRequest,
-    MetaUpdateRequest,
-)
-
+from ..export.saga_exporter import export_saga
+from ..models.api_schemas import JobStatus
 from ..storage import get_storage
+from ..core.types import PatternMode
 
 router = APIRouter()
 
@@ -39,21 +24,25 @@ router = APIRouter()
 #   JOB CREATE
 # =====================================================================
 
+
 @router.post("/jobs")
 async def create_job(
     file: UploadFile = File(...),
-    brand: Literal["DMC","Gamma","Anchor","auto"] = "DMC",
+    brand: Literal["DMC", "Gamma", "Anchor", "auto"] = "DMC",
     min_cells_per_color: int = 30,
     detail_level: Literal["low", "medium", "high"] = "medium",
+    pattern_mode: PatternMode = "color",
 ):
     if file.content_type not in {"image/jpeg", "image/png"}:
         raise HTTPException(status_code=400, detail="Unsupported file type")
+    if min_cells_per_color < 1:
+        raise HTTPException(status_code=400, detail="min_cells_per_color must be >= 1")
 
     content = await file.read()
     try:
         img = Image.open(io.BytesIO(content)).convert("RGB")
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid image")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid image") from exc
 
     job_id = str(uuid4())
 
@@ -66,6 +55,7 @@ async def create_job(
             "brand": brand,
             "min_cells": min_cells_per_color,
             "detail_level": detail_level,
+            "pattern_mode": pattern_mode,
         },
     )
 
@@ -77,6 +67,7 @@ async def create_job(
         brand=brand,
         min_cells=min_cells_per_color,
         detail_level=detail_level,
+        pattern_mode=pattern_mode,
     )
     pattern_dict = pattern.dict()
 
@@ -88,10 +79,10 @@ async def create_job(
         preview_obj = render_preview(pattern, mode="color")
 
         if isinstance(preview_obj, (bytes, bytearray)):
-            preview_img = PILImage.open(io.BytesIO(preview_obj)).convert("RGBA")
+            preview_img = Image.open(io.BytesIO(preview_obj)).convert("RGBA")
         elif isinstance(preview_obj, np.ndarray):
-            preview_img = PILImage.fromarray(preview_obj).convert("RGBA")
-        elif isinstance(preview_obj, PILImage.Image):
+            preview_img = Image.fromarray(preview_obj).convert("RGBA")
+        elif isinstance(preview_obj, Image.Image):
             preview_img = preview_obj.convert("RGBA")
         else:
             preview_img = None
@@ -110,10 +101,10 @@ async def create_job(
                 scale = math.ceil(target_w / preview_img.width)
                 preview_img = preview_img.resize(
                     (preview_img.width * scale, preview_img.height * scale),
-                    resample=PILImage.NEAREST,
+                    resample=Image.NEAREST,
                 )
 
-            preview_img.thumbnail((max_total_w, target_h), resample=PILImage.NEAREST)
+            preview_img.thumbnail((max_total_w, target_h), resample=Image.NEAREST)
 
             buf = io.BytesIO()
             preview_img.save(buf, format="PNG")
@@ -133,10 +124,7 @@ async def create_job(
 
     # Update job store
     job_store.update(job_id, status="done", progress=1.0)
-    grid = {
-        "width": pattern.canvasGrid.width,
-        "height": pattern.canvasGrid.height
-    }
+    grid = {"width": pattern.canvasGrid.width, "height": pattern.canvasGrid.height}
     job_store.set_pattern(job_id, pattern_dict, grid=grid)
 
     # ============================================
@@ -160,6 +148,7 @@ async def create_job(
 #   JOB GET
 # =====================================================================
 
+
 @router.get("/jobs/{job_id}")
 async def get_job(job_id: str):
     record = job_store.get(job_id)
@@ -167,17 +156,20 @@ async def get_job(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
 
     job = record.to_dict(include_pattern=True)
-    return JobStatus(**{
-        "status": job["status"],
-        "progress": job["progress"],
-        "meta": job.get("meta", {}),
-        "grid": job.get("grid"),
-    })
+    return JobStatus(
+        **{
+            "status": job["status"],
+            "progress": job["progress"],
+            "meta": job.get("meta", {}),
+            "grid": job.get("grid"),
+        }
+    )
 
 
 # =====================================================================
 #   LEGEND
 # =====================================================================
+
 
 @router.get("/jobs/{job_id}/legend")
 async def get_legend(job_id: str):
@@ -193,6 +185,7 @@ async def get_legend(job_id: str):
 #   PREVIEW
 # =====================================================================
 
+
 @router.get("/jobs/{job_id}/preview")
 async def preview(job_id: str, mode: Literal["color", "symbols"] = "color"):
     record = job_store.get(job_id)
@@ -203,9 +196,9 @@ async def preview(job_id: str, mode: Literal["color", "symbols"] = "color"):
         img_bytes = render_preview(record.pattern, mode=mode)
         if isinstance(img_bytes, np.ndarray):
             buf = io.BytesIO()
-            PILImage.fromarray(img_bytes).save(buf, format="PNG")
+            Image.fromarray(img_bytes).save(buf, format="PNG")
             img_bytes = buf.getvalue()
         return Response(content=img_bytes, media_type="image/png")
     except Exception as e:
         print(f"[WARN] preview failed: {e}")
-        raise HTTPException(status_code=500, detail="Preview render failed")
+        raise HTTPException(status_code=500, detail="Preview render failed") from e

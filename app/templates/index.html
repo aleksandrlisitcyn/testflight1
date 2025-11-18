@@ -2,79 +2,665 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Stitch Converter</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 2rem; background: #f5f5f5; }
-    form { background: #fff; padding: 1.5rem; border-radius: 8px; max-width: 420px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-    label { display: block; margin-bottom: 0.5rem; font-weight: 600; }
-    input, select { width: 100%; padding: 0.5rem; margin-bottom: 1rem; }
-    button { padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; }
+    :root {
+      --sidebar-bg: #f5f5f7;
+      --workspace-bg: #ffffff;
+      --border: #d2d2d7;
+      --text-main: #1d1d1f;
+      --text-muted: #6e6e73;
+      --accent: #0071e3;
+      --accent-soft: rgba(0, 113, 227, 0.08);
+      --shadow-soft: 0 25px 40px rgba(26, 33, 45, 0.12);
+      --radius-lg: 18px;
+      --radius-md: 14px;
+      --radius-sm: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "SF Pro Display", "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--text-main);
+      background: linear-gradient(135deg, #f8f8fa 0%, #ececf0 60%, #e2e3e8 100%);
+    }
+
+    .app-shell {
+      display: flex;
+      min-height: 100vh;
+      background: var(--workspace-bg);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .sidebar {
+      width: 260px;
+      background: var(--sidebar-bg);
+      border-right: 1px solid var(--border);
+      padding: 32px 28px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+
+    .logo {
+      font-size: 20px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      color: var(--text-main);
+    }
+
+    .sidebar small {
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.16em;
+      color: var(--text-muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input[type="file"],
+    input[type="number"],
+    select {
+      width: 100%;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border);
+      background: #ffffff;
+      padding: 10px 12px;
+      font-size: 14px;
+      color: var(--text-main);
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    input[type="file"]::file-selector-button {
+      border: none;
+      border-radius: 10px;
+      background: #e8e8ed;
+      padding: 6px 12px;
+      margin-right: 10px;
+      font-size: 13px;
+      color: var(--text-main);
+      cursor: pointer;
+    }
+
+    input:focus,
+    select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(0, 113, 227, 0.2);
+    }
+
+    select {
+      appearance: none;
+      background-image: linear-gradient(45deg, transparent 50%, #8e8e93 50%),
+        linear-gradient(135deg, #8e8e93 50%, transparent 50%);
+      background-position: calc(100% - 18px) calc(50% - 2px), calc(100% - 12px) calc(50% - 2px);
+      background-size: 6px 6px, 6px 6px;
+      background-repeat: no-repeat;
+    }
+
+    .field-group {
+      display: flex;
+      gap: 12px;
+    }
+
+    .field-group > div {
+      flex: 1;
+    }
+
+    .field-note {
+      font-size: 12px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      display: block;
+    }
+
+    .primary-btn {
+      border: none;
+      border-radius: 999px;
+      background: var(--accent);
+      color: white;
+      padding: 12px 20px;
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow: 0 12px 24px rgba(0, 113, 227, 0.3);
+      transition: transform 0.15s ease, box-shadow 0.2s;
+    }
+
+    .primary-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 18px 26px rgba(0, 113, 227, 0.36);
+    }
+
+    .sidebar .note {
+      padding: 16px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.9);
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .workspace {
+      flex: 1;
+      padding: 48px 64px;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+      background: #fbfbfd;
+    }
+
+    .panel-header {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .panel-header h1 {
+      margin: 0;
+      font-size: 28px;
+      font-weight: 600;
+    }
+
+    .panel-header p {
+      margin: 0;
+      color: var(--text-muted);
+    }
+
+    .canvas-panel {
+      background: var(--workspace-bg);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      padding: 28px;
+      box-shadow: var(--shadow-soft);
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    .canvas-surface {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 5 / 3;
+      min-height: 360px;
+      border-radius: var(--radius-lg);
+      background: linear-gradient(135deg, #fafafa, #ebecee);
+      overflow: hidden;
+    }
+
+    #cropCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    .canvas-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 15px;
+      pointer-events: none;
+      padding: 20px;
+    }
+
+    .canvas-placeholder.hidden {
+      opacity: 0;
+    }
+
+    .canvas-hint {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .preview-card {
+      background: var(--workspace-bg);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-soft);
+      padding: 32px;
+      display: flex;
+      align-items: center;
+      gap: 32px;
+    }
+
+    .preview-figure {
+      flex: 1;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--border);
+      padding: 12px;
+      background: #f8f9fb;
+      display: flex;
+      justify-content: center;
+      min-height: 260px;
+    }
+
+    .preview-figure img {
+      max-width: 100%;
+      max-height: 100%;
+      border-radius: var(--radius-sm);
+      box-shadow: inset 0 0 0 1px rgba(210, 210, 215, 0.6);
+    }
+
+    .download-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: stretch;
+      min-width: 220px;
+    }
+
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 12px 16px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: #f6f6f7;
+      color: var(--text-main);
+      text-decoration: none;
+      font-weight: 600;
+      transition: background 0.2s, box-shadow 0.2s;
+    }
+
+    .download-btn:hover {
+      background: #ffffff;
+      box-shadow: 0 12px 20px rgba(0, 0, 0, 0.08);
+    }
+
+    .job-card {
+      margin-top: auto;
+      padding: 18px;
+      border-radius: var(--radius-md);
+      border: 1px dashed var(--border);
+      background: rgba(255, 255, 255, 0.65);
+      font-size: 12px;
+      color: var(--text-muted);
+      word-break: break-word;
+    }
+
+    @media (max-width: 1100px) {
+      .workspace {
+        padding: 38px 32px;
+      }
+      .preview-card {
+        flex-direction: column;
+      }
+      .download-stack {
+        width: 100%;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .download-btn {
+        flex: 1;
+        min-width: 180px;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .app-shell {
+        flex-direction: column;
+      }
+      .sidebar {
+        width: 100%;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+        flex-direction: column;
+        gap: 20px;
+      }
+      .workspace {
+        padding: 24px;
+      }
+    }
   </style>
 </head>
 <body>
-  <h1>Загрузка изображения</h1>
-  <form id="upload-form" enctype="multipart/form-data" method="post" action="/api/v1/jobs">
-    <label>Изображение:</label>
-    <input type="file" name="file" accept="image/png,image/jpeg" required>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="logo">Stitch Converter</div>
+      <small>Лёгкая утилита в стиле macOS для подготовки схем вышивки.</small>
 
-    <label>Бренд:</label>
-    <select name="brand">
-      <option value="DMC" selected>DMC</option>
-      <option value="Gamma">Gamma</option>
-      <option value="Anchor">Anchor</option>
-      <option value="auto">Авто</option>
-    </select>
+      <form id="uploadForm" action="/upload" method="post" enctype="multipart/form-data">
+        <div>
+          <label for="fileInput">Файл изображения</label>
+          <input id="fileInput" type="file" name="file" accept="image/*" required>
+        </div>
+        <div>
+          <label for="brandSelect">Марка ниток</label>
+          <select id="brandSelect" name="brand">
+            <option value="DMC" selected>DMC</option>
+            <option value="Gamma">Gamma</option>
+            <option value="Anchor">Anchor</option>
+            <option value="auto">Auto (подбор)</option>
+          </select>
+        </div>
+        <div>
+          <label for="modeSelect">Режим распознавания</label>
+          <select id="modeSelect" name="pattern_mode">
+            <option value="color" selected>Color — клетки с цветом</option>
+            <option value="symbol">Symbol — тёмные символы</option>
+            <option value="mixed">Mixed — баланс цвета и символов</option>
+          </select>
+          <span class="field-note">Режим влияет только на считывание сетки и цветов, фон не удаляется автоматически.</span>
+        </div>
+        <div>
+          <label for="minCells">Мин. клеток на цвет</label>
+          <input id="minCells" type="number" name="min_cells_per_color" min="1" value="30">
+        </div>
+        <button type="submit" class="primary-btn">Generate Pattern</button>
+      </form>
 
-    <label>Мин. ячеек на цвет:</label>
-    <input type="number" name="min_cells_per_color" value="30" min="1">
+      <div class="note">
+        Файл будет обрезан локально по выделенному фрагменту перед отправкой на сервер.
+      </div>
 
-    <label>Детализация:</label>
-    <select name="detail_level">
-      <option value="low">Низкая</option>
-      <option value="medium" selected>Средняя</option>
-      <option value="high">Высокая</option>
-    </select>
+      {% if job %}
+      <div class="job-card">{{ job }}</div>
+      {% endif %}
+    </aside>
 
-    <button type="submit">Создать схему</button>
-  </form>
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-  <meta charset="UTF-8">
-  <title>Stitch Converter</title>
-  <style>
-    body { font-family: sans-serif; margin: 2em; background: #fafafa; }
-    form { margin-bottom: 2em; }
-    input[type=file] { margin: 1em 0; }
-    img { max-width: 400px; border: 1px solid #ccc; margin-top: 1em; }
-  </style>
-</head>
-<body>
-  <h1>🎨 Stitch Converter</h1>
-  <form action="/upload" method="post" enctype="multipart/form-data">
-    <label>Загрузите изображение:</label><br>
-    <input type="file" name="file" accept="image/*" required>
-    <br><br>
-    <label>Марка ниток:</label>
-    <select name="brand">
-      <option value="DMC">DMC</option>
-    </select>
-    <br><br>
-    <label>Мин. ячеек на цвет:</label>
-    <input type="number" name="min_cells_per_color" value="30">
-    <br><br>
-    <button type="submit">Создать схему</button>
-  </form>
+    <main class="workspace">
+      <section class="canvas-panel">
+        <div class="panel-header">
+          <h1>Рабочая область</h1>
+          <p>Загрузите изображение и перетащите мышью, чтобы выбрать нужную часть.</p>
+        </div>
+        <div class="canvas-surface" data-canvas-wrapper>
+          <canvas id="cropCanvas" aria-label="Область кадрирования"></canvas>
+          <div class="canvas-placeholder" id="canvasPlaceholder">
+            Выберите изображение слева, чтобы отобразить его здесь.
+          </div>
+        </div>
+        <p class="canvas-hint">Перетащите мышью по изображению. Оставьте область пустой, чтобы отправить кадр полностью.</p>
+      </section>
 
-  {% if job %}
-    <h2>Результат</h2>
-    <p><b>ID:</b> {{ job.job_id }}</p>
-    <p><b>Статус:</b> {{ job.status }}</p>
-    <img src="{{ preview_url }}" alt="Preview">
-    <p>
-      <a href="{{ pdf_url }}" download>📄 Скачать PDF</a> |
-      <a href="{{ saga_url }}" download>📦 Скачать SAGA</a>
-    </p>
-  {% endif %}
+      {% if preview_url %}
+      <section class="preview-card">
+        <div class="preview-figure">
+          <img src="{{ preview_url }}" alt="Предпросмотр схемы">
+        </div>
+        <div class="download-stack">
+          {% if pdf_url %}
+          <a href="{{ pdf_url }}" class="download-btn" download>Скачать PDF</a>
+          {% endif %}
+          {% if saga_url %}
+          <a href="{{ saga_url }}" class="download-btn" download>Скачать SAGA</a>
+          {% endif %}
+        </div>
+      </section>
+      {% endif %}
+    </main>
+  </div>
+
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const form = document.getElementById("uploadForm");
+      const fileInput = document.getElementById("fileInput");
+      const canvas = document.getElementById("cropCanvas");
+      const placeholder = document.getElementById("canvasPlaceholder");
+      const canvasWrapper = document.querySelector("[data-canvas-wrapper]");
+      const ctx = canvas.getContext("2d");
+
+      if (!form || !fileInput || !canvas || !ctx) {
+        return;
+      }
+
+      let image = new Image();
+      let imageReady = false;
+      let selection = null;
+      let dragging = false;
+      let dragStart = { x: 0, y: 0 };
+      let imageBounds = null;
+
+      function resizeCanvas() {
+        if (!canvasWrapper) return;
+        const width = canvasWrapper.clientWidth;
+        const height = canvasWrapper.clientHeight;
+        if (width === 0 || height === 0) return;
+        canvas.width = width;
+        canvas.height = height;
+        draw();
+      }
+
+      function computeImageBounds() {
+        if (!imageReady) return null;
+        const scale = Math.min(canvas.width / image.width, canvas.height / image.height);
+        const displayWidth = image.width * scale;
+        const displayHeight = image.height * scale;
+        const offsetX = (canvas.width - displayWidth) / 2;
+        const offsetY = (canvas.height - displayHeight) / 2;
+        return { x: offsetX, y: offsetY, width: displayWidth, height: displayHeight, scale };
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#fdfdfd";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        if (!imageReady) {
+          return;
+        }
+
+        imageBounds = computeImageBounds();
+        if (!imageBounds) return;
+
+        ctx.drawImage(image, imageBounds.x, imageBounds.y, imageBounds.width, imageBounds.height);
+
+        if (selection) {
+          ctx.save();
+          ctx.fillStyle = varAccentSoft();
+          ctx.strokeStyle = varAccent();
+          ctx.lineWidth = 2;
+          ctx.setLineDash([8, 6]);
+          ctx.fillRect(selection.x, selection.y, selection.width, selection.height);
+          ctx.strokeRect(selection.x, selection.y, selection.width, selection.height);
+          ctx.restore();
+        }
+      }
+
+      function varAccent() {
+        return getComputedStyle(document.documentElement).getPropertyValue("--accent") || "#0071e3";
+      }
+
+      function varAccentSoft() {
+        return getComputedStyle(document.documentElement).getPropertyValue("--accent-soft") || "rgba(0, 113, 227, 0.1)";
+      }
+
+      function togglePlaceholder(state) {
+        if (!placeholder) return;
+        placeholder.classList.toggle("hidden", state);
+      }
+
+      function getPointerPosition(evt) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleX = canvas.width / rect.width;
+        const scaleY = canvas.height / rect.height;
+        return {
+          x: (evt.clientX - rect.left) * scaleX,
+          y: (evt.clientY - rect.top) * scaleY,
+        };
+      }
+
+      function clampPoint(point) {
+        if (!imageBounds) return point;
+        const minX = imageBounds.x;
+        const minY = imageBounds.y;
+        const maxX = imageBounds.x + imageBounds.width;
+        const maxY = imageBounds.y + imageBounds.height;
+        return {
+          x: Math.min(Math.max(point.x, minX), maxX),
+          y: Math.min(Math.max(point.y, minY), maxY),
+        };
+      }
+
+      canvas.addEventListener("pointerdown", (event) => {
+        if (!imageReady) return;
+        const pos = getPointerPosition(event);
+        if (!imageBounds) return;
+        if (
+          pos.x < imageBounds.x ||
+          pos.x > imageBounds.x + imageBounds.width ||
+          pos.y < imageBounds.y ||
+          pos.y > imageBounds.y + imageBounds.height
+        ) {
+          return;
+        }
+        dragging = true;
+        dragStart = clampPoint(pos);
+        selection = { x: dragStart.x, y: dragStart.y, width: 0, height: 0 };
+        canvas.setPointerCapture(event.pointerId);
+        draw();
+      });
+
+      canvas.addEventListener("pointermove", (event) => {
+        if (!dragging || !selection) return;
+        const current = clampPoint(getPointerPosition(event));
+        const x = Math.min(current.x, dragStart.x);
+        const y = Math.min(current.y, dragStart.y);
+        const width = Math.abs(current.x - dragStart.x);
+        const height = Math.abs(current.y - dragStart.y);
+        selection = { x, y, width, height };
+        draw();
+      });
+
+      function endDrag(event) {
+        if (!dragging) return;
+        dragging = false;
+        if (event && event.pointerId) {
+          try {
+            canvas.releasePointerCapture(event.pointerId);
+          } catch (err) {
+            // ignore
+          }
+        }
+        if (selection && (selection.width < 4 || selection.height < 4)) {
+          selection = null;
+        }
+        draw();
+      }
+
+      canvas.addEventListener("pointerup", endDrag);
+      canvas.addEventListener("pointerleave", endDrag);
+
+      fileInput.addEventListener("change", () => {
+        const file = fileInput.files[0];
+        selection = null;
+        if (!file) {
+          imageReady = false;
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          togglePlaceholder(false);
+          return;
+        }
+        const objectUrl = URL.createObjectURL(file);
+        image = new Image();
+        image.onload = () => {
+          imageReady = true;
+          togglePlaceholder(true);
+          draw();
+          URL.revokeObjectURL(objectUrl);
+        };
+        image.onerror = () => {
+          imageReady = false;
+          togglePlaceholder(false);
+          URL.revokeObjectURL(objectUrl);
+        };
+        image.src = objectUrl;
+      });
+
+      function getCropFromSelection() {
+        if (!selection || !imageBounds) return null;
+        const ratio = image.width / imageBounds.width;
+        const cropX = Math.max(0, Math.round((selection.x - imageBounds.x) * ratio));
+        const cropY = Math.max(0, Math.round((selection.y - imageBounds.y) * ratio));
+        const cropWidth = Math.max(1, Math.round(selection.width * ratio));
+        const cropHeight = Math.max(1, Math.round(selection.height * ratio));
+        return { cropX, cropY, cropWidth, cropHeight };
+      }
+
+      function replaceFileWithCrop(callback) {
+        const crop = getCropFromSelection();
+        if (!crop) {
+          callback(null);
+          return;
+        }
+        const tmpCanvas = document.createElement("canvas");
+        tmpCanvas.width = crop.cropWidth;
+        tmpCanvas.height = crop.cropHeight;
+        const tmpCtx = tmpCanvas.getContext("2d");
+        tmpCtx.drawImage(
+          image,
+          crop.cropX,
+          crop.cropY,
+          crop.cropWidth,
+          crop.cropHeight,
+          0,
+          0,
+          crop.cropWidth,
+          crop.cropHeight
+        );
+        const original = fileInput.files[0];
+        const mime = (original && original.type) || "image/png";
+        tmpCanvas.toBlob(
+          (blob) => {
+            if (!blob) {
+              callback(null);
+              return;
+            }
+            const extension = mime === "image/png" ? "png" : mime === "image/jpeg" ? "jpg" : "png";
+            const baseName = original && original.name ? original.name.replace(/\.[^.]+$/, "") : "selection";
+            const file = new File([blob], `${baseName}_crop.${extension}`, { type: mime });
+            callback(file);
+          },
+          mime,
+          0.95
+        );
+      }
+
+      form.addEventListener("submit", (event) => {
+        if (!imageReady || !selection || selection.width < 4 || selection.height < 4) {
+          return;
+        }
+        event.preventDefault();
+        replaceFileWithCrop((file) => {
+          if (file) {
+            const dt = new DataTransfer();
+            dt.items.add(file);
+            fileInput.files = dt.files;
+          }
+          form.submit();
+        });
+      });
+
+      resizeCanvas();
+      window.addEventListener("resize", resizeCanvas);
+    });
+  </script>
 </body>
 </html>

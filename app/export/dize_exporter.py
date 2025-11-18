@@ -22,7 +22,9 @@ def export_dize(pattern: dict) -> bytes:
 
         legend_csv = io.StringIO()
         legend_writer = csv.writer(legend_csv)
-        legend_writer.writerow(["index", "brand", "code", "name", "symbol", "hex", "count", "percent"])
+        legend_writer.writerow(
+            ["index", "brand", "code", "name", "symbol", "hex", "count", "percent"],
+        )
         for idx, entry in enumerate(context["legend"], start=1):
             legend_writer.writerow(
                 [

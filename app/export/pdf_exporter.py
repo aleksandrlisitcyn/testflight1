@@ -1,11 +1,39 @@
 import io
-from typing import Optional, Dict, Any
+from pathlib import Path
+from typing import Any, Dict, Optional
 
+from PIL import Image
 from reportlab.lib.pagesizes import A4, landscape
-from reportlab.pdfgen import canvas
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
-from PIL import Image
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfgen import canvas
+
+FONT_CANDIDATES = [
+    Path("assets/fonts/DejaVuSans.ttf"),
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    Path("/usr/local/share/fonts/DejaVuSans.ttf"),
+]
+FONT_NAME = "DejaVuSans"
+
+
+def _ensure_font() -> str:
+    try:
+        pdfmetrics.getFont(FONT_NAME)
+        return FONT_NAME
+    except KeyError:
+        pass
+
+    for candidate in FONT_CANDIDATES:
+        if candidate.exists():
+            try:
+                pdfmetrics.registerFont(TTFont(FONT_NAME, str(candidate)))
+                return FONT_NAME
+            except Exception as exc:  # fallback to built-in fonts if file is broken
+                print(f"[WARN] Failed to register font {candidate}: {exc}")
+                continue
+    return "Helvetica"
 
 
 def export_pdf(pattern: Dict[str, Any], preview: Optional[bytes] = None) -> bytes:
@@ -26,7 +54,11 @@ def export_pdf(pattern: Dict[str, Any], preview: Optional[bytes] = None) -> byte
     # 1) Title
     # -----------------------------------------------------------------
     title = pattern.get("meta", {}).get("title") or "Cross-Stitch Pattern"
-    c.setFont("Helvetica-Bold", 20)
+    font_name = _ensure_font()
+    title_font_name = f"{font_name}-Bold"
+    if title_font_name not in pdfmetrics.getRegisteredFontNames():
+        title_font_name = font_name
+    c.setFont(title_font_name, 20)
     c.drawString(20 * mm, page_h - 20 * mm, title)
 
     # -----------------------------------------------------------------
@@ -63,30 +95,28 @@ def export_pdf(pattern: Dict[str, Any], preview: Optional[bytes] = None) -> byte
     # 3) Legend block
     # -----------------------------------------------------------------
     palette = pattern.get("palette", [])
-    c.setFont("Helvetica", 11)
+    legend_entries = pattern.get("meta", {}).get("legend") or palette
+    c.setFont(font_name, 11)
 
-    legend_x = page_w * 0.75
+    legend_x = page_w * 0.7
     legend_y = page_h - 30 * mm
-
     c.drawString(legend_x, legend_y + 10, "Legend:")
 
-    # each entry: symbol – BRAND CODE Name
-    for p in palette:
+    for entry in legend_entries:
         legend_y -= 12
         if legend_y < 15 * mm:
-            # new page if we run out of space
             c.showPage()
             legend_y = page_h - 20 * mm
-            c.setFont("Helvetica", 11)
-        symbol = p.get("symbol", "?")
-        brand = p.get("brand", "")
-        code = p.get("code", "")
-        name = p.get("name", "")
-        c.drawString(
-            legend_x,
-            legend_y,
-            f"{symbol}: {brand} {code} {name}",
-        )
+            c.setFont(font_name, 11)
+        symbol = entry.get("symbol") or entry.get("symbol", "?")
+        brand = entry.get("brand", "")
+        code = entry.get("code", "")
+        name = entry.get("name", "") or ""
+        count = entry.get("count")
+        line = f"{symbol:<3} {brand} {code} {name}"
+        if count:
+            line += f" ({count})"
+        c.drawString(legend_x, legend_y, line)
 
     # -----------------------------------------------------------------
     # 4) Grid information / meta
@@ -98,11 +128,14 @@ def export_pdf(pattern: Dict[str, Any], preview: Optional[bytes] = None) -> byte
     total_stitches = pattern.get("meta", {}).get("total_stitches", 0)
     palette_size = pattern.get("meta", {}).get("palette_size", len(palette))
 
-    c.setFont("Helvetica", 10)
+    meta = pattern.get("meta", {})
+    detail_level = meta.get("detail_level")
+    c.setFont(font_name, 10)
     c.drawString(
         20 * mm,
         20 * mm,
-        f"Grid size: {w} × {h} cells; Colors: {palette_size}; Stitches: {total_stitches}",
+        f"Grid: {w} × {h} cells · Colors: {palette_size} · Stitches: {total_stitches}"
+        + (f" · Detail: {detail_level}" if detail_level else ""),
     )
 
     c.showPage()
