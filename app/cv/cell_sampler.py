@@ -28,7 +28,8 @@ def _aggregate_patch(sample: np.ndarray, pattern_mode: PatternMode) -> Tuple[int
     median = np.median(flat, axis=0)
 
     if pattern_mode == "symbol":
-        # Symbols are often dark ink on lighter paper – median keeps edges without drifting to paper.
+        # Symbols are often dark ink on lighter paper – median keeps edges without drifting
+        # towards paper tones.
         value = median
     elif pattern_mode == "mixed":
         value = 0.5 * mean + 0.5 * median

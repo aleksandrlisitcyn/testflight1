@@ -11,9 +11,9 @@ try:  # pragma: no cover - optional dependency
 except Exception:  # pragma: no cover
     cv2 = None  # type: ignore
 
-logger = logging.getLogger(__name__)
-
 from ..core.types import PatternMode
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass

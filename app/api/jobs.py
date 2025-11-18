@@ -11,11 +11,11 @@ from PIL import Image
 from ..core.jobs import store as job_store
 from ..core.legend import build_legend
 from ..core.pipeline import process_image_to_pattern, render_preview
+from ..core.types import PatternMode
 from ..export.pdf_exporter import export_pdf
 from ..export.saga_exporter import export_saga
 from ..models.api_schemas import JobStatus
 from ..storage import get_storage
-from ..core.types import PatternMode
 
 router = APIRouter()
 
