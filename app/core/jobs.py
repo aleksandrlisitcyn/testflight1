@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import copy
+import time
 from dataclasses import dataclass, field
 from threading import Lock
 from typing import Callable, Dict, Iterable, Optional
-import time
-import copy
 
 
 @dataclass
@@ -38,7 +38,14 @@ class JobStore:
         self._jobs: Dict[str, JobRecord] = {}
         self._lock = Lock()
 
-    def create(self, job_id: str, *, status: str = "processing", progress: float = 0.0, meta: Optional[dict] = None) -> JobRecord:
+    def create(
+        self,
+        job_id: str,
+        *,
+        status: str = "processing",
+        progress: float = 0.0,
+        meta: Optional[dict] = None,
+    ) -> JobRecord:
         record = JobRecord(job_id=job_id, status=status, progress=progress, meta=meta or {})
         with self._lock:
             self._jobs[job_id] = record
@@ -57,7 +64,12 @@ class JobStore:
             record.updated_at = time.time()
             return record
 
-    def set_pattern(self, job_id: str, pattern: dict, grid: Optional[dict] = None) -> Optional[JobRecord]:
+    def set_pattern(
+        self,
+        job_id: str,
+        pattern: dict,
+        grid: Optional[dict] = None,
+    ) -> Optional[JobRecord]:
         with self._lock:
             record = self._jobs.get(job_id)
             if not record:
@@ -87,7 +99,12 @@ class JobStore:
             # Return a shallow copy to avoid accidental external mutation
             return copy.deepcopy(record)
 
-    def list(self, *, status: Optional[str] = None, query: Optional[str] = None) -> Iterable[JobRecord]:
+    def list(
+        self,
+        *,
+        status: Optional[str] = None,
+        query: Optional[str] = None,
+    ) -> Iterable[JobRecord]:
         with self._lock:
             records = list(self._jobs.values())
         if status:
@@ -95,7 +112,8 @@ class JobStore:
         if query:
             query_lower = query.lower()
             records = [
-                r for r in records
+                r
+                for r in records
                 if query_lower in r.job_id.lower()
                 or any(query_lower in str(value).lower() for value in r.meta.values())
             ]

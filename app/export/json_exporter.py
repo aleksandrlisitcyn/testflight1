@@ -1,5 +1,8 @@
 import base64
+import json
+
 from ..core.pipeline import render_pattern_image
+
 
 def export_json(pattern):
     pat = pattern.dict() if hasattr(pattern, "dict") else pattern

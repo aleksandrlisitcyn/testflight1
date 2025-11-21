@@ -1,7 +1,12 @@
 fastapi
-jinja2
-requests
-uvicorn
 httpx
+jinja2
+numpy
+opencv-python-headless
+pillow
+python-multipart
+reportlab
+requests
 scikit-learn
+uvicorn
 weasyprint

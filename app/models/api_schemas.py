@@ -1,5 +1,7 @@
-from pydantic import BaseModel, Field, ConfigDict
-from typing import Optional, List, Literal, Any
+from typing import Any, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
 
 class JobStatus(BaseModel):
     status: Literal["done", "processing", "failed"]
@@ -7,8 +9,12 @@ class JobStatus(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
     grid: Optional[dict] = None
 
+
 class ExportRequest(BaseModel):
-    formats: List[Literal["saga","pdf","json","csv","xsd","xsp","css","dize"]] = ["saga","pdf"]
+    formats: List[Literal["saga", "pdf", "json", "csv", "xsd", "xsp", "css", "dize"]] = [
+        "saga",
+        "pdf",
+    ]
 
 
 class MetaUpdateRequest(BaseModel):

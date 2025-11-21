@@ -1,6 +1,7 @@
 import io
+import logging
 from collections import Counter
-from typing import Literal, Tuple, Dict, List, Union
+from typing import Dict, List, Literal, Tuple, Union
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
@@ -12,40 +13,44 @@ from ..cv.grid_detector import detect_and_rectify_grid, detect_pattern_roi
 from ..models.pattern import CanvasGrid, Pattern, Stitch, ThreadRef
 from .legend import build_legend
 from .symbols import assign_symbols_to_palette
+from .types import PatternMode
+
+logger = logging.getLogger(__name__)
 
 
 # =====================================================================
 #  Helpers
 # =====================================================================
 
-def resize_for_detail(image: np.ndarray, detail_level: Literal["low", "medium", "high"]) -> np.ndarray:
+
+def resize_for_detail(
+    image: np.ndarray,
+    detail_level: Literal["low", "medium", "high"],
+) -> np.ndarray:
     """
     Adaptive resize based on detail level.
     Keeps aspect ratio, reduces very large photos while not upscaling small ones too aggressively.
+
+    NOTE: detail_level is currently ignored intentionally to keep recognition neutral. The argument
+    remains for API compatibility and will be repurposed for output-only tweaks later on.
     """
     import cv2
 
     h, w = image.shape[:2]
     max_side = max(h, w) or 1
 
-    if detail_level == "low":
-        target_cells = min(max_side // 8, 250)
-        contrast_alpha = 1.05
-        contrast_beta = 5
-    elif detail_level == "high":
-        target_cells = min(max_side // 2, 800)
-        contrast_alpha = 1.2
-        contrast_beta = 12
-    else:
-        # medium
-        target_cells = min(max_side // 4, 450)
-        contrast_alpha = 1.12
-        contrast_beta = 8
+    target_cells = min(max_side // 4, 450)
+    contrast_alpha = 1.12
+    contrast_beta = 8
 
     if target_cells <= 0:
         target_cells = max_side
 
-    scale = max(target_cells / float(max_side), 1e-6)
+    if max_side <= 700:
+        scale = 1.0
+    else:
+        scale = max(target_cells / float(max_side), 0.2)
+        scale = min(1.0, scale)
     new_w = max(1, int(round(w * scale)))
     new_h = max(1, int(round(h * scale)))
 
@@ -64,46 +69,159 @@ def _color_distance(rgb_a: Tuple[int, int, int], rgb_b: Tuple[int, int, int]) ->
     return float(np.linalg.norm(a - b))
 
 
+def _estimate_color_spread(colors: Dict[Tuple[int, int], Tuple[int, int, int]]) -> float:
+    if not colors:
+        return 0.0
+    arr = np.array(list(colors.values()), dtype=float)
+    center = arr.mean(axis=0)
+    distances = np.linalg.norm(arr - center, axis=1)
+    return float(distances.mean())
+
+
+def _build_sanity_report(
+    palette_size: int,
+    grid_size: Tuple[int, int],
+    roi_size: Tuple[int, int],
+    filled_cells: int,
+    color_spread: float,
+) -> Dict[str, object]:
+    grid_w, grid_h = grid_size
+    roi_w, roi_h = roi_size
+    total_cells = max(1, grid_w * grid_h)
+    fill_ratio = filled_cells / total_cells
+
+    issues: List[Dict[str, object]] = []
+    if palette_size < 2 and color_spread > 12:
+        issues.append(
+            {
+                "code": "palette_too_small",
+                "details": {
+                    "color_spread": round(color_spread, 2),
+                    "filled_cells": filled_cells,
+                },
+            }
+        )
+    roi_area = roi_w * roi_h
+    if roi_area > 0 and total_cells <= 9:
+        issues.append(
+            {
+                "code": "grid_too_coarse",
+                "details": {
+                    "roi_area": roi_area,
+                    "grid_cells": total_cells,
+                },
+            }
+        )
+    if fill_ratio < 0.3 and filled_cells > 4:
+        issues.append(
+            {
+                "code": "sparse_fill",
+                "details": {
+                    "fill_ratio": round(fill_ratio, 3),
+                    "filled_cells": filled_cells,
+                },
+            }
+        )
+
+    return {
+        "status": "ok" if not issues else "flagged",
+        "issues": issues,
+        "metrics": {
+            "palette_size": palette_size,
+            "grid_width": grid_w,
+            "grid_height": grid_h,
+            "roi_width": roi_w,
+            "roi_height": roi_h,
+            "filled_cells": filled_cells,
+            "color_spread": round(color_spread, 2),
+        },
+        "fallback_applied": False,
+    }
+
+
 # =====================================================================
 #  IMAGE → PATTERN
 # =====================================================================
+
+
+def _detect_background_color(
+    samples: Dict[Tuple[int, int], Tuple[int, int, int]],
+) -> Tuple[int, int, int] | None:
+    if not samples:
+        return None
+    quantised = [
+        (
+            int(round(rgb[0] / 12.0) * 12),
+            int(round(rgb[1] / 12.0) * 12),
+            int(round(rgb[2] / 12.0) * 12),
+        )
+        for rgb in samples.values()
+    ]
+    counter: Counter[Tuple[int, int, int]] = Counter(quantised)
+    (color, count), *_ = counter.most_common(1) or [((0, 0, 0), 0)]
+    ratio = count / max(len(quantised), 1)
+    brightness = sum(color) / 3.0
+    saturation = max(color) - min(color)
+
+    if ratio >= 0.48 and (brightness >= 185 or brightness <= 40 or saturation <= 18):
+        return color
+    return None
+
 
 def process_image_to_pattern(
     image: np.ndarray,
     brand: Literal["DMC", "Gamma", "Anchor", "auto"] = "DMC",
     min_cells: int = 30,
     detail_level: Literal["low", "medium", "high"] = "medium",
+    pattern_mode: PatternMode = "color",
 ) -> Pattern:
     """
     Main pipeline:
       1) adaptive resize & pre-processing
       2) detect ROI (stitch grid or whole image)
       3) detect grid & sample average color per cell
-      4) detect background color and drop it
+      4) detect background colour candidate (metadata only)
       5) palette matching (DMC / Gamma / Anchor / auto)
-      6) min_cells filtering
+      6) local per-cell consolidation (no global collapse)
       7) assign symbols
       8) build Pattern model
     """
-    # 1) adaptive resize / denoise / contrast
-    image_proc = resize_for_detail(image, detail_level=detail_level)
+    # 1) ROI detection on original image to keep geometry intact
+    roi_result = detect_pattern_roi(image, pattern_mode=pattern_mode)
+    roi = roi_result.roi
 
-    # 2) ROI and grid detection
-    roi = detect_pattern_roi(image_proc)
-    grid_dict = detect_and_rectify_grid(roi)
+    # 2) adaptive resize & grid detection inside ROI
+    roi_for_grid = resize_for_detail(roi, detail_level=detail_level)
+    grid_dict = detect_and_rectify_grid(
+        roi_for_grid,
+        detail_level=detail_level,
+        pattern_mode=pattern_mode,
+    )
+    grid_roi = grid_dict.get("roi")
+    if grid_roi is None or getattr(grid_roi, "size", 0) == 0:
+        grid_roi = roi
+    if grid_roi.size == 0:
+        logger.warning("Grid ROI is empty, falling back to original ROI crop")
+        grid_roi = roi
 
     # 3) sample average colors per logical cell
-    colors: Dict[Tuple[int, int], Tuple[int, int, int]] = split_into_cells_and_average(roi, grid_dict)
+    sampling_method: Literal["mean", "centroid"]
+    sampling_method = "centroid" if pattern_mode == "symbol" else "mean"
+    colors: Dict[Tuple[int, int], Tuple[int, int, int]] = split_into_cells_and_average(
+        grid_roi,
+        grid_dict,
+        method=sampling_method,
+        pattern_mode=pattern_mode,
+    )
+    if not colors:
+        logger.warning("No cells detected after sampling; using fallback ROI averaging")
+        grid_dict["width"] = grid_dict.get("width") or 1
+        grid_dict["height"] = grid_dict.get("height") or 1
+        h, w = grid_roi.shape[:2]
+        colors[(0, 0)] = tuple(int(c) for c in grid_roi.reshape(-1, 3).mean(axis=0))
 
-    # 4) background detection (most frequent quantised color)
-    bg_counter: Counter[Tuple[int, int, int]] = Counter()
-    for (_x, _y), rgb in colors.items():
-        q = tuple(int(int(c) / 16) * 16 for c in rgb)
-        bg_counter[q] += 1
-
-    background_quant = None
-    if bg_counter:
-        background_quant, _ = bg_counter.most_common(1)[0]
+    # 4) background detection (metadata only – nothing is dropped automatically)
+    background_quant = _detect_background_color(colors)
 
     # 5) palette matching
     resolved_brand = "DMC" if brand == "auto" else brand
@@ -115,33 +233,17 @@ def process_image_to_pattern(
     stitches_raw: List[Dict[str, object]] = []
 
     for (x, y), rgb in colors.items():
-        # Skip background / canvas color
-        if background_quant is not None:
-            q = tuple(int(int(c) / 16) * 16 for c in rgb)
-            if q == background_quant:
-                continue
-
         matched = nearest_color(kd, rgb, palette)
         key = (matched["brand"], matched["code"])
         used_palette[key] = matched
         counts[key] += 1
         stitches_raw.append({"x": int(x), "y": int(y), "key": key})
 
-    # 6) min_cells filtering
-    if counts and min_cells > 1:
-        major_keys = {key for key, cnt in counts.items() if cnt >= min_cells}
-        if not major_keys:
-            major_keys = set(counts.keys())
-    else:
-        major_keys = set(counts.keys())
-
-    # Build thread_map limited to major_keys
+    # Build thread map without collapsing “minor” colours globally.
     thread_map: Dict[Tuple[str, str], ThreadRef] = {}
     final_counts: Counter[Tuple[str, str]] = Counter()
 
     for key, entry in used_palette.items():
-        if key not in major_keys:
-            continue
         rgb_tuple = tuple(int(c) for c in (entry.get("rgb") or entry.get("color") or (0, 0, 0)))
         thread = ThreadRef(
             brand=entry["brand"],
@@ -170,7 +272,7 @@ def process_image_to_pattern(
 
     # 8) assign symbols to palette
     palette_list = []
-    for (_brand_code, thread) in thread_map.items():
+    for _brand_code, thread in thread_map.items():
         palette_list.append(
             {
                 "brand": thread.brand,
@@ -210,10 +312,49 @@ def process_image_to_pattern(
         )
 
     # 9) build Pattern
-    width_cells = int(grid_dict.get("width") or 0) or max((s.x for s in final_stitches), default=-1) + 1
-    height_cells = int(grid_dict.get("height") or 0) or max((s.y for s in final_stitches), default=-1) + 1
+    width_cells = int(grid_dict.get("width") or 0) or (
+        max((s.x for s in final_stitches), default=-1) + 1
+    )
+    height_cells = int(grid_dict.get("height") or 0) or (
+        max((s.y for s in final_stitches), default=-1) + 1
+    )
+
+    if not final_stitches:
+        logger.warning("Pipeline produced no stitches; falling back to single grayscale cell")
+        fallback_thread = ThreadRef(
+            brand=resolved_brand,  # type: ignore[arg-type]
+            code="000",
+            name="Fallback",
+            rgb=(30, 30, 30),
+            symbol="■",
+        )
+        new_thread_map = {(fallback_thread.brand, fallback_thread.code): fallback_thread}
+        final_stitches = [Stitch(x=0, y=0, thread=fallback_thread)]
+        width_cells = height_cells = 1
+        final_counts = Counter({(fallback_thread.brand, fallback_thread.code): 1})
 
     total_stitches = int(sum(final_counts.values()))
+
+    meta: Dict[str, object] = {
+        "title": "Generated Pattern",
+        "dpi": 300,
+        "brand": resolved_brand,
+        "palette_size": len(new_thread_map),
+        "total_stitches": total_stitches,
+        "detail_level": detail_level,
+        "min_cells_per_color": min_cells,
+        "pattern_mode": pattern_mode,
+        "roi_confidence": getattr(roi_result, "confidence", 0.0),
+        "grid_confidence": grid_dict.get("confidence"),
+    }
+    if background_quant:
+        meta["background_candidate"] = {
+            "rgb": tuple(int(c) for c in background_quant),
+            "note": (
+                "Detected via a frequency heuristic only. We keep this colour available because "
+                "antique charts can rely on the background hue."
+            ),
+        }
 
     pattern = Pattern(
         canvasGrid=CanvasGrid(
@@ -222,24 +363,26 @@ def process_image_to_pattern(
         ),
         palette=list(new_thread_map.values()),
         stitches=final_stitches,
-        meta={
-            "title": "Generated Pattern",
-            "dpi": 300,
-            "brand": resolved_brand,
-            "palette_size": len(new_thread_map),
-            "total_stitches": total_stitches,
-            "detail_level": detail_level,
-        },
+        meta=meta,
     )
 
-    # precompute legend
+    # precompute legend and build a sanity snapshot
     pattern.meta["legend"] = build_legend(pattern, force=True)
+    roi_h, roi_w = grid_roi.shape[:2] if grid_roi.size else roi.shape[:2]
+    pattern.meta["sanity"] = _build_sanity_report(
+        palette_size=len(pattern.palette),
+        grid_size=(pattern.canvasGrid.width, pattern.canvasGrid.height),
+        roi_size=(roi_w, roi_h),
+        filled_cells=len(colors),
+        color_spread=_estimate_color_spread(colors),
+    )
     return pattern
 
 
 # =====================================================================
 #  PREVIEW RENDERING
 # =====================================================================
+
 
 def render_preview(pattern: Union[dict, Pattern], mode: str = "color") -> bytes:
     """
@@ -291,11 +434,11 @@ def render_preview(pattern: Union[dict, Pattern], mode: str = "color") -> bytes:
                 brand = getattr(thread, "brand", None)
                 code = getattr(thread, "code", None)
         else:
-            x = int(getattr(s, "x"))
-            y = int(getattr(s, "y"))
-            thread = getattr(s, "thread")
-            brand = getattr(thread, "brand", None)
-            code = getattr(thread, "code", None)
+            x = int(s.x)
+            y = int(s.y)
+            thread = s.thread
+            brand = thread.brand
+            code = thread.code
 
         if brand is None or code is None:
             continue
@@ -322,14 +465,16 @@ def render_preview(pattern: Union[dict, Pattern], mode: str = "color") -> bytes:
         px = x * cell
         if 0 <= px < img.shape[1]:
             color = accent_grid if x % 10 == 0 else base_grid
-            img[:, px:px + 1] = color
+            thickness = 2 if x % 10 == 0 else 1
+            img[:, px : min(img.shape[1], px + thickness)] = color
 
     # horizontal
     for y in range(h + 1):
         py = y * cell
         if 0 <= py < img.shape[0]:
             color = accent_grid if y % 10 == 0 else base_grid
-            img[py:py + 1, :] = color
+            thickness = 2 if y % 10 == 0 else 1
+            img[py : min(img.shape[0], py + thickness), :] = color
 
     pil = Image.fromarray(img, mode="RGB")
     draw = ImageDraw.Draw(pil)
@@ -351,17 +496,24 @@ def render_preview(pattern: Union[dict, Pattern], mode: str = "color") -> bytes:
                 else:
                     symbol = getattr(thread, "symbol", None)
             else:
-                x = int(getattr(s, "x"))
-                y = int(getattr(s, "y"))
-                thread = getattr(s, "thread")
-                symbol = getattr(thread, "symbol", None)
+                x = int(s.x)
+                y = int(s.y)
+                thread = s.thread
+                symbol = thread.symbol
 
             if not symbol:
                 continue
 
+            text = str(symbol)
             cx = x * cell + cell // 2
             cy = y * cell + cell // 2
-            draw.text((cx, cy), str(symbol), fill=(0, 0, 0), anchor="mm", font=font)
+            try:
+                bbox = draw.textbbox((0, 0), text, font=font)
+                tw = bbox[2] - bbox[0]
+                th = bbox[3] - bbox[1]
+                draw.text((cx - tw / 2, cy - th / 2), text, fill=(0, 0, 0), font=font)
+            except Exception:
+                draw.text((cx, cy), text, fill=(0, 0, 0), anchor="mm", font=font)
 
     buf = io.BytesIO()
     pil.save(buf, format="PNG")
